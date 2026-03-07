@@ -1,0 +1,22 @@
+from pydantic import BaseModel, Field
+
+class UserGroupBase(BaseModel):
+    name: str = Field(..., max_length=100)
+
+
+class UserGroupCreate(UserGroupBase):
+    owner_id: int
+
+
+class UserGroupUpdate(BaseModel):
+    name: str | None = Field(None, max_length=100)
+    owner_id: int | None = None
+
+
+class UserGroupOut(UserGroupBase):
+    id: int
+    owner_id: int
+    created_by_id: int
+
+    class Config:
+        from_attributes = True

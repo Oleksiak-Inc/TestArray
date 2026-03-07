@@ -1,0 +1,13 @@
+fastapi==0.128.0
+pydantic==2.12.5
+pydantic[email]
+pydantic_settings==2.12.0
+python-dotenv==1.2.1
+SQLAlchemy==2.0.46
+starlette==0.50.0
+uvicorn==0.40.0
+psycopg[binary]
+alembic
+passlib[bcrypt]
+python-jose==3.3.0
+

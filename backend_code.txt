@@ -1,0 +1,1577 @@
+# File: ./backend/run.py
+import uvicorn
+from app import create_app
+from core.config import settings
+
+app = create_app()
+
+print("Starting app on", settings.SERVER_HOST, settings.SERVER_PORT)
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "run:app",
+        host=settings.SERVER_HOST,
+        port=settings.SERVER_PORT
+    )
+
+# File: ./backend/identify_encoding.py
+import os
+
+for root, _, files in os.walk("."):
+    for f in files:
+        if f.endswith(".py"):
+            path = os.path.join(root, f)
+            try:
+                with open(path, encoding="utf-8") as file:
+                    file.read()
+            except UnicodeDecodeError:
+                print("Bad encoding in:", path)
+
+
+# File: ./backend/db/engine.py
+from sqlalchemy import create_engine
+from core.config import settings
+
+engine = create_engine(
+    settings.database_url,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_recycle=1800,
+    pool_pre_ping=True,
+    future=True,
+)
+
+# File: ./backend/db/base.py
+from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase):
+    pass
+
+# File: ./backend/db/__init__.py
+
+
+# File: ./backend/db/session.py
+from sqlalchemy.orm import sessionmaker, Session
+from db.engine import engine
+from typing import Generator
+
+SessionLocal = sessionmaker(
+    autocommit=False, 
+    autoflush=False, 
+    bind=engine
+)
+
+def get_db() -> Generator[Session, None, None]:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# File: ./backend/db/models/scenarios.py
+from sqlalchemy import Column, Index, Integer, String
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Scenarios(Base):
+    __tablename__ = "scenarios"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True)
+
+    test_cases = relationship("TestCases", back_populates="scenario", foreign_keys="TestCases.scenario_id")
+
+    
+
+# File: ./backend/db/models/user_types.py
+from sqlalchemy import Column, Index, Integer, String, Text
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class UserTypes(Base):
+    __tablename__ = "user_types"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(Text)
+
+    # ---- relationships ----
+    users = relationship(
+        "Users",
+        foreign_keys="Users.user_type_id",
+        back_populates="user_type"
+    )
+
+# File: ./backend/db/models/devices.py
+from sqlalchemy import Column, Index, Integer, String, ForeignKey
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Devices(Base):
+    __tablename__ = "devices"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id",use_alter=True), nullable=False)
+    name_external = Column(String)
+    name_internal = Column(String)
+    cpu = Column(String)
+    gpu = Column(String)
+    ram = Column(String)
+
+    project = relationship("Projects", back_populates="devices", foreign_keys=[project_id])
+    executions = relationship("Executions", back_populates="device", foreign_keys="Executions.device_id")
+
+    __table_args__ = (
+        Index("device_project_idx", "project_id"),
+    )
+
+# File: ./backend/db/models/attachments.py
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, Index
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from db.base import Base
+
+class Attachments(Base):
+    __tablename__ = "attachments"
+
+    id = Column(Integer, primary_key=True)
+
+    parent_attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
+    uploaded_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
+    resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
+
+    filename = Column(String)
+    relative_path = Column(String)
+
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    presentmon_version = Column(String)
+
+    settings = Column(JSON)
+
+    parent = relationship(
+        "Attachments",
+        remote_side=[id],
+        backref="children"
+    )
+
+    uploader = relationship("Users", back_populates="uploads", foreign_keys=[uploaded_by])
+    resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
+    executions = relationship("Executions", back_populates="attachment", foreign_keys="Executions.attachment_id")
+
+
+    __table_args__ = (
+        Index("attachment_parent_idx", "parent_attachment_id"),
+        Index("attachment_uploaded_by_idx", "uploaded_by"),
+        Index("attachment_filename_idx", "filename"),
+        Index("attachment_uploaded_at_idx", "uploaded_at"),
+        Index("attachment_resolution_idx", "resolution_id"),
+    )
+
+# File: ./backend/db/models/statuses.py
+from sqlalchemy import Column, Index, Integer, String, Text, ForeignKey
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Statuses(Base):
+    __tablename__ = "statuses"
+
+    id = Column(Integer, primary_key=True)
+    status_set_id = Column(Integer, ForeignKey("status_sets.id"), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+
+    status_set = relationship("StatusSets", back_populates="statuses", foreign_keys=[status_set_id])
+    executions = relationship("Executions", back_populates="status", foreign_keys="Executions.status_id")
+
+    __table_args__ = (
+        Index("status_name_idx", "name"),
+        Index("status_status_set_idx", "status_set_id"),
+    )
+
+# File: ./backend/db/models/resolutions.py
+from sqlalchemy import Column, Integer, UniqueConstraint
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Resolutions(Base):
+    __tablename__ = "resolutions"
+
+    id = Column(Integer, primary_key=True)
+    h = Column(Integer, nullable=False)
+    w = Column(Integer, nullable=False)
+
+    attachments = relationship(
+        "Attachments",
+        back_populates="resolution",
+        foreign_keys="Attachments.resolution_id"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("h", "w", name="resolutions_hw_unique"),
+    )
+
+# File: ./backend/db/models/users.py
+from sqlalchemy import Column, Index, Integer, String, Boolean, DateTime, ForeignKey, func
+from sqlalchemy.orm import relationship
+from db.base import Base
+
+class Users(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
+    user_group_id = Column(Integer, ForeignKey("user_groups.id", use_alter=True), nullable=True)
+    user_type_id = Column(Integer, ForeignKey("user_types.id"), nullable=False)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    email = Column(String, nullable=False, unique=True)
+    password = Column(String, nullable=False)
+
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_login_at = Column(DateTime(timezone=True))
+
+    # ---- relationships ----
+    user_type = relationship(
+        "UserTypes", 
+        foreign_keys=[user_type_id], 
+        back_populates="users")
+
+    user_group = relationship(
+        "UserGroups",
+        foreign_keys=[user_group_id],
+        back_populates="members"
+    )
+
+    groups_created = relationship(
+        "UserGroups",
+        foreign_keys="UserGroups.created_by_id",
+        back_populates="created_by"
+    )
+
+    groups_owned = relationship(
+        "UserGroups",
+        foreign_keys="UserGroups.owner_id",
+        back_populates="owner"
+    )
+
+    uploads = relationship(
+        "Attachments", 
+        foreign_keys="Attachments.uploaded_by", 
+        back_populates="uploader")
+    
+    executions = relationship(
+        "Executions", 
+        foreign_keys="Executions.executed_by", 
+        back_populates="executor")
+    
+    created_test_case_versions = relationship(
+        "TestCaseVersions", 
+        foreign_keys="TestCaseVersions.created_by", 
+        back_populates="creator")
+    
+    sessions = relationship(
+        "Sessions",
+        foreign_keys="Sessions.user_id", 
+        back_populates="user")
+    
+    __table_args__ = (
+        Index("user_user_type_idx", "user_type_id"),
+        Index("user_user_group_idx", "user_group_id"),
+    )
+
+# File: ./backend/db/models/user_groups.py
+from sqlalchemy import Column, Index, Integer, String, ForeignKey
+from sqlalchemy.orm import relationship
+from db.base import Base
+
+class UserGroups(Base):
+    __tablename__ = "user_groups"
+    id = Column(Integer, primary_key=True)
+
+    # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
+    created_by_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
+    owner_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
+
+    name = Column(String, unique=True)
+
+    # ---- relationships ----
+    created_by = relationship(
+        "Users",
+        foreign_keys=[created_by_id],
+        back_populates="groups_created"
+    )
+
+    owner = relationship(
+        "Users",
+        foreign_keys=[owner_id],
+        back_populates="groups_owned"
+    )
+
+    members = relationship(
+        "Users",
+        foreign_keys="Users.user_group_id",
+        back_populates="user_group"
+    )
+
+    __table_args__ = (
+        Index("user_group_owner_idx", "owner_id"),
+        Index("user_group_created_by_idx", "created_by_id"),
+    )
+
+# File: ./backend/db/models/suitcases.py
+from sqlalchemy import Column, ForeignKey, Index, Integer, UniqueConstraint
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Suitcases(Base):
+    __tablename__ = "suitcases"
+
+    id = Column(Integer, primary_key=True)
+    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
+    test_suite_id = Column(Integer, ForeignKey("test_suites.id"), nullable=False)
+
+    test_case = relationship("TestCases", back_populates="suitcases", foreign_keys=[test_case_id])
+    test_suite = relationship("TestSuites", back_populates="suitcases", foreign_keys=[test_suite_id])
+
+    __table_args__ = (
+        UniqueConstraint("test_case_id", "test_suite_id"),
+        Index("suitcase_test_case_idx", "test_case_id"),
+        Index("suitcase_test_suite_idx", "test_suite_id"),
+    )
+
+# File: ./backend/db/models/__init__.py
+from .users import Users
+from .projects import Projects
+from .devices import Devices
+from .clients import Clients
+from .attachments import Attachments
+from .resolutions import Resolutions
+from .executions import Executions
+from .runs import Runs
+from .test_cases import TestCases
+from .test_case_versions import TestCaseVersions
+from .test_suites import TestSuites
+from .suitcases import Suitcases
+from .statuses import Statuses
+from .status_sets import StatusSets
+from .scenarios import Scenarios
+from .user_groups import UserGroups
+from .user_types import UserTypes
+from .sessions import Sessions
+
+# File: ./backend/db/models/test_cases.py
+from sqlalchemy import Column, Index, Integer, ForeignKey
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class TestCases(Base):
+    __tablename__ = "test_cases"
+
+    id = Column(Integer, primary_key=True)
+    scenario_id = Column(Integer, ForeignKey("scenarios.id"), nullable=False)
+    status_set_id = Column(Integer, ForeignKey("status_sets.id"), nullable=False)
+    scenario = relationship("Scenarios", back_populates="test_cases", foreign_keys=[scenario_id])
+    status_set = relationship("StatusSets", back_populates="test_cases", foreign_keys=[status_set_id])
+    versions = relationship("TestCaseVersions", back_populates="test_case", foreign_keys="TestCaseVersions.test_case_id")
+    suitcases = relationship("Suitcases", back_populates="test_case", foreign_keys="Suitcases.test_case_id")
+
+    __table_args__ = (
+        Index("test_case_scenario_idx", "scenario_id"),
+        Index("test_case_status_set_idx", "status_set_id"),
+    )
+
+# File: ./backend/db/models/projects.py
+from sqlalchemy import Column, Index, Integer, String, ForeignKey
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Projects(Base):
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    client_id = Column(Integer, ForeignKey("clients.id",use_alter=True), nullable=False)
+
+    client = relationship("Clients", back_populates="projects", foreign_keys=[client_id])
+    devices = relationship("Devices", back_populates="project", foreign_keys="Devices.project_id")
+
+    runs = relationship("Runs", back_populates="project", foreign_keys="Runs.project_id")
+
+    __table_args__ = (
+        Index("project_name_idx", "name"),
+    )
+
+# File: ./backend/db/models/executions.py
+from sqlalchemy import Column, Index, Integer, Text, DateTime, ForeignKey, UniqueConstraint
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Executions(Base):
+    __tablename__ = "executions"
+
+    id = Column(Integer, primary_key=True)
+
+    device_id = Column(Integer, ForeignKey("devices.id",use_alter=True), nullable=False)
+    run_id = Column(Integer, ForeignKey("runs.id",use_alter=True), nullable=False)
+    test_case_version_id = Column(Integer, ForeignKey("test_case_versions.id",use_alter=True), nullable=False)
+
+    executed_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
+    status_id = Column(Integer, ForeignKey("statuses.id",use_alter=True), nullable=False)
+
+    attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
+
+    actual_result = Column(Text)
+    executed_at = Column(DateTime(timezone=True))
+
+    execution_order = Column(Integer, nullable=False)
+
+    device = relationship("Devices", back_populates="executions", foreign_keys=[device_id])
+    run = relationship("Runs", back_populates="executions", foreign_keys=[run_id])
+    test_case_version = relationship("TestCaseVersions", back_populates="executions", foreign_keys=[test_case_version_id])
+    executor = relationship("Users", foreign_keys=[executed_by], back_populates="executions")
+    status = relationship("Statuses", back_populates="executions", foreign_keys=[status_id])
+    attachment = relationship("Attachments", back_populates="executions", foreign_keys=[attachment_id])
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "test_case_version_id",
+            name="execution_run_version_unique"
+        ),
+        Index("execution_status_idx", "status_id"),
+        Index("execution_executor_idx", "executed_by"),
+        Index("execution_device_idx", "device_id"),
+        Index("execution_attachment_idx", "attachment_id"),
+        Index("execution_run_idx", "run_id"),
+        Index("execution_test_case_version_idx", "test_case_version_id"),
+    )
+
+# File: ./backend/db/models/status_sets.py
+from sqlalchemy import Column, Index, Integer, String
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class StatusSets(Base):
+    __tablename__ = "status_sets"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True)
+
+    statuses = relationship(
+        "Statuses",
+        back_populates="status_set",
+        foreign_keys="Statuses.status_set_id"
+    )
+    
+    test_cases = relationship(
+        "TestCases",
+        back_populates="status_set",
+        foreign_keys="TestCases.status_set_id"
+    )
+
+
+# File: ./backend/db/models/test_suites.py
+from db.base import Base
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import relationship
+
+class TestSuites(Base):
+    __tablename__ = "test_suites"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True)
+
+    suitcases = relationship(
+        "Suitcases", 
+        back_populates="test_suite",
+        foreign_keys="Suitcases.test_suite_id"
+    )
+
+# File: ./backend/db/models/runs.py
+from sqlalchemy import Column, Index, Integer, String, DateTime, Text, ForeignKey
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Runs(Base):
+    __tablename__ = "runs"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+
+    started_at = Column(DateTime(timezone=True))
+    done_at = Column(DateTime(timezone=True))
+
+    test_suite_metadata = Column(Text)
+
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+
+    project = relationship("Projects", back_populates="runs", foreign_keys=[project_id])
+    executions = relationship("Executions", back_populates="run", foreign_keys="Executions.run_id")
+
+    __table_args__ = (
+        Index("run_name_idx", "name"),
+        Index("run_project_idx", "project_id"),
+    )
+
+# File: ./backend/db/models/clients.py
+from sqlalchemy import Column, Index, Integer, String
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Clients(Base):
+    __tablename__ = "clients"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False) 
+
+    projects = relationship(
+        "Projects",
+        back_populates="client",
+        foreign_keys="Projects.client_id"
+    )
+
+# File: ./backend/db/models/test_case_versions.py
+from sqlalchemy import Column, Index, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
+from db.base import Base
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+class TestCaseVersions(Base):
+    __tablename__ = "test_case_versions"
+
+    id = Column(Integer, primary_key=True)
+    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    release_ready = Column(Boolean, default=False)
+    version = Column(Integer, nullable=False)
+    name = Column(String)
+    description = Column(Text)
+    steps = Column(Text)
+    expected_result = Column(Text)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    test_case = relationship("TestCases", back_populates="versions", foreign_keys=[test_case_id])
+    creator = relationship("Users", foreign_keys=[created_by], back_populates="created_test_case_versions")
+    executions = relationship("Executions", back_populates="test_case_version", foreign_keys="Executions.test_case_version_id")
+
+    __table_args__ = (
+        UniqueConstraint("test_case_id", "version", name="test_case_version_unique"),
+        Index("test_case_version_test_case_idx", "test_case_id"),
+        Index("test_case_version_created_at_idx", "created_at"),
+        Index("test_case_version_created_by_idx", "created_by"),
+    )
+
+# File: ./backend/db/models/sessions.py
+from db.base import Base
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, func
+from sqlalchemy.orm import relationship
+
+
+class Sessions(Base):
+    __tablename__ = "sessions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
+    token = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    user = relationship(
+        "Users",
+        foreign_keys=[user_id], 
+        back_populates="sessions")
+
+    __table_args__ = (
+        Index("session_user_id_idx", "user_id"),
+        Index("session_token_idx", "token"),
+    )
+
+# File: ./backend/core/config.py
+from pathlib import Path
+from typing import Optional
+from pydantic import Field, PostgresDsn
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    APP_NAME: str = "TestArray"
+    API_V1_STR: str = Field(..., env="API_V1_STR")
+
+    #SECRET_KEY: str = Field(..., env="SECRET_KEY")
+    #JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_SECONDS: int = 60 * 60 * 12
+    
+    SERVER_HOST: str = Field(..., env="SERVER_HOST")
+    SERVER_PORT: int = Field(..., env="SERVER_PORT")
+
+    POSTGRES_SERVER: str = Field(..., env="POSTGRES_SERVER")
+    DATABASE_URL: Optional[PostgresDsn] = None
+    POSTGRES_PORT: str = Field(..., env="POSTGRES_PORT")
+    POSTGRES_DB: str = Field(..., env="POSTGRES_DB")
+    POSTGRES_USER: str = Field(..., env="POSTGRES_USER")
+    POSTGRES_PASSWORD: str = Field(..., env="POSTGRES_PASSWORD")
+
+    FRONTEND_ORIGINS: str = Field(..., env="FRONTEND_ORIGINS")
+    #JWT_SECRET_KEY: str = Field(..., env="JWT_SECRET_KEY")
+
+    UPLOAD_DIR: str = Field(..., env="UPLOAD_DIR")
+    MAX_FILE_SIZE: int = 100 * 1024 * 1024
+    ALLOWED_FILE_EXTENSIONS: set = {'.txt', '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.csv', '.json', '.xml'}
+
+    @property
+    def get_upload_path(self) -> Path:
+        upload_path = Path(self.UPLOAD_DIR)
+        upload_path.mkdir(parents=True, exist_ok=True)
+        return upload_path
+    
+    @property
+    def database_url(self) -> str:
+        if self.DATABASE_URL:
+            return str(self.DATABASE_URL)
+        return str(PostgresDsn.build(
+            scheme="postgresql+psycopg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_SERVER,
+            port=int(self.POSTGRES_PORT) if self.POSTGRES_PORT else None,
+            path=self.POSTGRES_DB or None,
+        ))
+
+    class Config:
+        case_sensitive = True
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+settings = Settings()
+
+# File: ./backend/core/startup.py
+from db.session import SessionLocal
+from db.models.user_types import UserTypes
+
+
+def init_db() -> None:
+    """Initialize required reference data.
+
+    Called on application startup.
+    """
+    db = SessionLocal()
+    try:
+        # Ensure there is at least a "regular" user type for registrations.
+        # Add other base structs here as needed.
+        for name, description in [("admin", "Admin user"),("regular", "Regular user")]:
+            existing = db.query(UserTypes).filter(UserTypes.name == name).first()
+            if not existing:
+                db.add(UserTypes(name=name, description=description))
+        db.commit()
+    finally:
+        db.close()
+
+
+# File: ./backend/app/__init__.py
+from os import getenv
+from fastapi import FastAPI
+from core.config import settings
+from core.startup import init_db
+from app.api import api_router
+from starlette.middleware.cors import CORSMiddleware
+
+FRONTEND_ORIGINS = getenv("FRONTEND_ORIGINS", "").split(",")
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title=settings.APP_NAME,
+        version="1.0.0",
+        docs_url=f"{settings.API_V1_STR}/docs",
+        redoc_url=f"{settings.API_V1_STR}/redoc",
+        openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=FRONTEND_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.on_event("startup")
+    async def _startup_event():
+        init_db()
+
+    app.include_router(api_router, prefix=settings.API_V1_STR)
+    
+    return app
+
+# File: ./backend/app/schemas/status_set.py
+
+
+# File: ./backend/app/schemas/device.py
+from pydantic import BaseModel, Field
+
+class DeviceBase(BaseModel):
+    name_external: str = Field(..., max_length=255)
+    name_internal: str | None = Field(None, max_length=255)
+    cpu: str | None = Field(None, max_length=255)
+    gpu: str | None = Field(None, max_length=255)
+    ram: int | None = None
+    project_id: int
+
+class DeviceCreate(DeviceBase):
+    pass
+
+class DeviceUpdate(BaseModel):
+    name_external: str | None = Field(None, max_length=255)
+    name_internal: str | None = Field(None, max_length=255)
+    cpu: str | None = Field(None, max_length=255)
+    gpu: str | None = Field(None, max_length=255)
+    ram: int | None = None
+    project_id: int | None = None
+
+class DeviceOut(DeviceBase):
+    id: int
+    name_external: str
+    name_internal: str | None
+    cpu: str | None
+    gpu: str | None
+    ram: int | None
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/suitcase.py
+
+
+# File: ./backend/app/schemas/test_suite.py
+
+
+# File: ./backend/app/schemas/user_type.py
+from pydantic import BaseModel, Field
+
+class UserTypeBase(BaseModel):
+    name: str = Field(..., max_length=100)
+    description: str | None = None
+
+
+class UserTypeCreate(UserTypeBase):
+    pass
+
+
+class UserTypeUpdate(BaseModel):
+    name: str | None = Field(None, max_length=100)
+    description: str | None = None
+
+
+class UserTypeOut(UserTypeBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/users.py
+from datetime import datetime
+from pydantic import BaseModel, EmailStr, Field
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    first_name: str
+    last_name: str
+    password: str = Field(..., min_length=8)
+
+class UserUpdateSelf(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    email: EmailStr | None = None
+    password: str | None = Field(None, min_length=8)
+
+class UserUpdateAdmin(BaseModel):
+    user_group_id: int | None = None
+    user_type_id: int | None = None
+    active: bool | None = None
+
+class UserOut(BaseModel):
+    id: int
+    email: EmailStr
+    first_name: str
+    last_name: str
+    active: bool
+    user_type_id: int
+    user_group_id: int | None
+    created_at: datetime
+    last_login_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/project.py
+from pydantic import BaseModel, Field
+
+class ProjectBase(BaseModel):
+    name: str = Field(..., max_length=255)
+    client_id: int
+
+class ProjectCreate(ProjectBase):
+    pass
+
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(None, max_length=255)
+    client_id: int | None = None
+
+class ProjectOut(ProjectBase):
+    id: int
+    name: str
+    client_id: int
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/status.py
+
+
+# File: ./backend/app/schemas/scenario.py
+
+
+# File: ./backend/app/schemas/test_case.py
+
+
+# File: ./backend/app/schemas/attachment.py
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+from datetime import datetime
+
+class AttachmentBase(BaseModel):
+    resolution_id: Optional[int] = None
+    settings: Optional[Dict[str, Any]] = None
+
+class AttachmentCreateInternal(BaseModel):
+    uploaded_by: int
+    filename: str
+    relative_path: str
+    resolution_id: Optional[int]
+    settings: Optional[dict]
+    presentmon_version: Optional[str]
+
+class AttachmentOut(BaseModel):
+    id: int
+    uploaded_at: datetime
+    uploaded_by: int
+    filename: str
+    
+    class Config:
+        from_attributes = True
+
+
+
+# File: ./backend/app/schemas/test_case_version.py
+
+
+# File: ./backend/app/schemas/user_group.py
+from pydantic import BaseModel, Field
+
+class UserGroupBase(BaseModel):
+    name: str = Field(..., max_length=100)
+
+
+class UserGroupCreate(UserGroupBase):
+    owner_id: int
+
+
+class UserGroupUpdate(BaseModel):
+    name: str | None = Field(None, max_length=100)
+    owner_id: int | None = None
+
+
+class UserGroupOut(UserGroupBase):
+    id: int
+    owner_id: int
+    created_by_id: int
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/run.py
+from pydantic import BaseModel, Field
+
+class RunBase(BaseModel):
+    name: str = Field(..., max_length=255)
+
+# File: ./backend/app/schemas/execution.py
+
+
+# File: ./backend/app/schemas/session.py
+
+
+# File: ./backend/app/schemas/auth.py
+from pydantic import BaseModel, EmailStr
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserRegister(BaseModel):
+    first_name: str
+    last_name: str
+    email: EmailStr
+    password: str
+
+class UserLogout(BaseModel):
+    pass
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class TokenPayload(BaseModel):
+    sub: int   # user id
+    exp: int
+
+
+# File: ./backend/app/schemas/client.py
+from pydantic import BaseModel, Field
+from app.schemas.project import ProjectOut
+
+class ClientBase(BaseModel):
+    name: str = Field(..., max_length=255)
+
+
+class ClientCreate(ClientBase):
+    pass
+
+
+class ClientUpdate(BaseModel):
+    name: str | None = Field(None, max_length=255)
+
+
+class ClientOut(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+class ClientWithProjects(ClientOut):
+    projects: list[ProjectOut]
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/resolution.py
+from pydantic import BaseModel, Field
+
+class ResolutionBase(BaseModel):
+    w: int
+    h: int
+
+class ResolutionCreate(ResolutionBase):
+    pass
+
+class ResolutionUpdate(BaseModel):
+    w: int | None = None
+    h: int | None = None
+
+class ResolutionOut(ResolutionBase):
+    id: int
+    w: int
+    h: int
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/services/status_set.py
+
+
+# File: ./backend/app/services/device.py
+
+
+# File: ./backend/app/services/suitcase.py
+
+
+# File: ./backend/app/services/test_suite.py
+
+
+# File: ./backend/app/services/user_type.py
+from db.models.user_types import UserTypes
+from sqlalchemy.orm import Session
+
+class UserTypeService:
+    def __init__(self, db: Session):
+        self.db = db
+    
+    def get_user_type_by_id(self, user_type_id: int):
+        return self.db.query(UserTypes).filter(UserTypes.id == user_type_id).first()
+    
+    def get_user_type_by_name(self, name: str):
+        return self.db.query(UserTypes).filter(UserTypes.name == name).first()
+
+# File: ./backend/app/services/users.py
+from db.models.users import Users
+from sqlalchemy.orm import Session
+
+class UserService:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_user_by_email(self, email: str):
+        user = self.db.query(Users).filter(Users.email == email).first()
+        if not user:
+            return None
+        return user
+
+    def get_user_by_id(self, user_id: int):
+        return self.db.query(Users).filter(Users.id == user_id).first()
+
+# File: ./backend/app/services/project.py
+
+
+# File: ./backend/app/services/status.py
+
+
+# File: ./backend/app/services/scenario.py
+
+
+# File: ./backend/app/services/test_case.py
+
+
+# File: ./backend/app/services/attachment.py
+
+
+# File: ./backend/app/services/test_case_version.py
+
+
+# File: ./backend/app/services/user_group.py
+
+
+# File: ./backend/app/services/run.py
+
+
+# File: ./backend/app/services/execution.py
+
+
+# File: ./backend/app/services/session.py
+
+from datetime import datetime
+from sqlalchemy.orm import Session
+from db.models.sessions import Sessions
+from app.api.utils.sessions import generate_session_secret, hash_session_secret
+
+
+class SessionService:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create_session(self, user_id: int, expires_at: datetime, created_at: datetime) -> str:
+        
+        session_secret = generate_session_secret()
+        session_hash = hash_session_secret(session_secret)
+
+        session = Sessions(
+            user_id=user_id,
+            token=session_hash,
+            created_at=created_at,
+            expires_at=expires_at
+        )
+        self.db.add(session)
+        self.db.commit()
+        return session_secret
+    
+    def get_session(self, session_secret: str):
+        session_hash = hash_session_secret(session_secret)
+        session = self.db.query(Sessions).filter(Sessions.token == session_hash).first()
+        if not session:
+            return None
+        return session
+    
+    def delete_session(self, session_secret: str):
+        session = self.get_session(session_secret)
+        
+        if not session:
+            return None
+        
+        self.db.delete(session)
+        self.db.commit()
+        return True
+
+# File: ./backend/app/services/auth.py
+from sqlalchemy.orm import Session
+from db.models.users import Users
+from db.models.sessions import Sessions as UserSessions
+from app.api.utils.auth import hash_password, verify_password
+from datetime import datetime, timedelta
+
+from core.config import settings
+from app.services.users import UserService
+from app.services.session import SessionService
+from app.services.user_type import UserTypeService
+
+class AuthService:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def login_user(self, email: str, password: str):
+        user = UserService(self.db).get_user_by_email(email)
+        if not user:
+            return None
+        if not verify_password(password, user.password):
+            return None
+
+        now = datetime.utcnow()
+        exp = now + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
+
+        session_secret = SessionService(self.db).create_session(user.id, exp, now)
+
+        user.last_login_at = now
+        self.db.commit()
+
+        return {"user": user, "access_token": session_secret}
+    
+    def validate_session(self, session_secret: str):
+        session = SessionService(self.db).get_session(session_secret=session_secret)
+        if not session:
+            return False
+        
+        if session.expires_at < datetime.utcnow():
+            SessionService(self.db).delete_session(session_secret)
+            return False
+        
+        user = UserService(self.db).get_user_by_id(session.user_id)
+        if not user or not user.active:
+            return False
+        
+        return True
+    
+    def register_user(self, first_name: str, last_name: str, email: str, password: str):
+        existing_user = self.db.query(Users).filter(Users.email == email).first()
+        regular_user_type = UserTypeService(self.db).get_user_type_by_name("regular")
+        
+        if existing_user:
+            return None
+        
+        if not regular_user_type:
+            return None
+        
+        hashed_password = hash_password(password)
+        new_user = Users(
+            first_name=first_name, 
+            last_name=last_name, 
+            email=email, 
+            password=hashed_password, 
+            user_type_id=regular_user_type.id
+            )
+        self.db.add(new_user)
+        self.db.commit()
+        self.db.refresh(new_user)
+        return new_user
+
+    def logout_user(self, session_secret: str):
+        session = SessionService(self.db).delete_session(session_secret)
+        
+        if not session:
+            return None
+        
+        return True
+
+    
+
+# File: ./backend/app/services/client.py
+from sqlalchemy.orm import Session, joinedload
+from db.models.clients import Clients
+from db.models.projects import Projects
+
+class ClientService:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_client(self, client_id):
+        return self.db.query(Clients).filter(Clients.id == client_id).first()
+
+    def get_client_with_projects(self, client_id):
+        return self.db.query(Clients).filter(Clients.id == client_id).options(
+            joinedload(Clients.projects)
+        ).first()
+
+    def create_client(self, client_data):
+        client = Clients(**client_data)
+        self.db.add(client)
+        self.db.commit()
+        self.db.refresh(client)
+        return client
+
+    def update_client(self, client_id, client_data):
+        client = self.get_client(client_id)
+        for key, value in client_data.items():
+            setattr(client, key, value)
+        self.db.commit()
+        self.db.refresh(client)
+        return client
+
+# File: ./backend/app/services/resolution.py
+
+
+# File: ./backend/app/api/__init__.py
+from fastapi import APIRouter
+from .v1 import (
+    attachment,
+    auth,
+    client,
+    device,
+    execution,
+    project,
+    resolution,
+    run,
+    scenario,
+    status_set,
+    status,
+    suitcase,
+    test_case_version,
+    test_case,
+    test_suite,
+    user_group,
+    user_type,
+    users,
+)
+
+api_router = APIRouter()
+
+api_router.include_router(attachment.router)
+api_router.include_router(auth.router)
+api_router.include_router(client.router)
+api_router.include_router(device.router)
+api_router.include_router(execution.router)
+api_router.include_router(project.router)
+api_router.include_router(resolution.router)
+api_router.include_router(run.router)
+api_router.include_router(scenario.router)
+api_router.include_router(status_set.router)
+api_router.include_router(status.router)
+api_router.include_router(suitcase.router)
+api_router.include_router(test_case_version.router)
+api_router.include_router(test_case.router)
+api_router.include_router(test_suite.router)
+api_router.include_router(user_group.router)
+api_router.include_router(user_type.router)
+api_router.include_router(users.router)
+
+# File: ./backend/app/api/utils/users.py
+
+
+# File: ./backend/app/api/utils/auth.py
+from datetime import datetime
+
+from fastapi import Depends, Cookie, HTTPException, status
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session
+
+from app.services.session import SessionService
+from app.services.users import UserService
+from db.session import get_db
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_current_user(
+    session: str | None = Cookie(None),
+    db: Session = Depends(get_db),
+):
+    if not session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    session_obj = SessionService(db).get_session(session)
+    if not session_obj:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    if session_obj.expires_at < datetime.utcnow():
+        SessionService(db).delete_session(session)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+
+    user = UserService(db).get_user_by_id(session_obj.user_id)
+    if not user or not user.active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    return user
+
+# File: ./backend/app/api/utils/sessions.py
+import hashlib
+import secrets
+
+
+def generate_session_secret() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def hash_session_secret(secret: str) -> str:
+    # Store session token hashes as hex strings so they can be stored in String columns.
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+# File: ./backend/app/api/v1/status_set.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/status-sets",
+    tags=["status-sets"],
+)
+
+# File: ./backend/app/api/v1/device.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/devices",
+    tags=["devices"],
+)
+
+# File: ./backend/app/api/v1/suitcase.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/suitcases",
+    tags=["suitcases"],
+)
+
+# File: ./backend/app/api/v1/test_suite.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/test-suites",
+    tags=["test-suites"],
+)
+
+# File: ./backend/app/api/v1/user_type.py
+from fastapi import APIRouter
+
+
+router = APIRouter(
+    prefix="/user-types",
+    tags=["user-types"],
+)
+
+# File: ./backend/app/api/v1/users.py
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+
+router = APIRouter(
+    prefix="/users",
+    tags=["users"],
+)
+
+# File: ./backend/app/api/v1/project.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/projects",
+    tags=["projects"],
+)
+
+# File: ./backend/app/api/v1/status.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/status",
+    tags=["status"],
+)
+
+# File: ./backend/app/api/v1/scenario.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/scenarios",
+    tags=["scenarios"],
+)
+
+# File: ./backend/app/api/v1/test_case.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/test-cases",
+    tags=["test-cases"],
+)
+
+# File: ./backend/app/api/v1/attachment.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/attachments",
+    tags=["attachments"],
+)
+
+# File: ./backend/app/api/v1/test_case_version.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/test-case-versions",
+    tags=["test-case-versions"],
+)
+
+# File: ./backend/app/api/v1/user_group.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/user-groups",
+    tags=["user-groups"],
+)
+
+# File: ./backend/app/api/v1/run.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/runs",
+    tags=["runs"],
+)
+
+# File: ./backend/app/api/v1/execution.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/executions",
+    tags=["executions"],
+)
+
+# File: ./backend/app/api/v1/session.py
+
+
+# File: ./backend/app/api/v1/auth.py
+from sqlalchemy.orm import Session
+from app.schemas.auth import UserLogin, TokenPayload, UserLogout, UserRegister
+from fastapi import APIRouter, Depends, HTTPException, Response, Cookie
+from typing import Optional
+from datetime import datetime, timedelta
+from app.schemas.users import UserOut
+from app.api.utils.auth import get_current_user
+from db.session import get_db
+from db.models.users import Users
+from app.services.auth import AuthService
+from core.config import settings
+
+router = APIRouter(
+    prefix="/auth",
+    tags=["auth"],
+)
+
+@router.post("/login", response_model=TokenPayload)
+async def login(
+    login_data: UserLogin,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    result = AuthService(db).login_user(
+        email=login_data.email, 
+        password=login_data.password
+    )
+    if not result:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    response.set_cookie(
+        key="session",
+        value=result["access_token"],
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_SECONDS
+    )
+
+    return TokenPayload(
+        sub=result["user"].id,
+        exp=int((datetime.utcnow() + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)).timestamp())
+    )
+
+@router.post("/logout")
+async def logout(
+    response: Response,
+    session: Optional[str] = Cookie(None),
+    db: Session = Depends(get_db),
+):
+    if not session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    is_valid = AuthService(db).validate_session(session)
+    if not is_valid:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    AuthService(db).logout_user(session)
+
+    response.delete_cookie(key="session")
+    return UserLogout()
+    
+@router.post("/register", response_model=UserOut)
+async def register(
+    login_data: UserRegister,
+    response: Response,
+    db: Session = Depends(get_db)
+):
+    result = AuthService(db).register_user(
+        first_name=login_data.first_name,
+        last_name=login_data.last_name,
+        email=login_data.email, 
+        password=login_data.password
+    )
+    if not result:
+        raise HTTPException(status_code=400, detail="User already exists")
+
+    return UserOut(
+        id=result.id,
+        email=result.email,
+        first_name=result.first_name,
+        last_name=result.last_name,
+        active=result.active,
+        user_type_id=result.user_type_id,
+        user_group_id=result.user_group_id,
+        created_at=result.created_at,
+        last_login_at=result.last_login_at
+    )
+
+
+@router.get("/me", response_model=UserOut)
+async def get_current_user_info(
+    current_user: Users = Depends(get_current_user),
+):
+    """Return the authenticated user's profile."""
+    return current_user
+    
+
+# File: ./backend/app/api/v1/client.py
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+from db.session import get_db
+
+from app.schemas.client import ClientBase, ClientCreate, ClientOut, ClientUpdate, ClientWithProjects
+from db.models.clients import Clients
+from db.models.projects import Projects
+
+from app.services.client import ClientService
+
+router = APIRouter(
+    prefix="/clients",
+    tags=["clients"],
+)
+
+@router.post("/", response_model=ClientOut, status_code=status.HTTP_201_CREATED)
+def create_client(
+    client_in: ClientCreate,
+    db: Session = Depends(get_db)
+):
+    service = ClientService(db)
+    client = service.create_client(client_in.dict())
+    return client
+
+
+# File: ./backend/app/api/v1/resolution.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/resolutions",
+    tags=["resolutions"],
+)
+
