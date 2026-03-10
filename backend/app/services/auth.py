@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from db.models.users import Users
 from db.models.sessions import Sessions as UserSessions
 from app.api.utils.auth import hash_password, verify_password
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from core.config import settings
 from app.services.users import UserService
@@ -20,7 +20,7 @@ class AuthService:
         if not verify_password(password, user.password):
             return None
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         exp = now + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
 
         session_secret = SessionService(self.db).create_session(user.id, exp, now)
@@ -35,7 +35,7 @@ class AuthService:
         if not session:
             return False
         
-        if session.expires_at < datetime.utcnow():
+        if session.expires_at < datetime.now(timezone.utc):
             SessionService(self.db).delete_session(session_secret)
             return False
         

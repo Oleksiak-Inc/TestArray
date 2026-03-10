@@ -670,6 +670,127 @@ def init_db() -> None:
         db.close()
 
 
+# File: ./backend/tests/test_auth.py
+from datetime import datetime
+
+import pytest
+
+
+def test_register_and_login_and_me_and_logout(client):
+    # Register a new user.
+    email = f"test-{datetime.utcnow().timestamp()}@example.com"
+    password = "test-password"
+
+    register_resp = client.post(
+        "/api/v1/auth/register",
+        json={
+            "first_name": "Test",
+            "last_name": "User",
+            "email": email,
+            "password": password,
+        },
+    )
+    assert register_resp.status_code == 200
+    assert register_resp.json()["email"] == email
+
+    # Login with the new user and make sure we get a session cookie.
+    login_resp = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": email,
+            "password": password,
+        },
+    )
+    assert login_resp.status_code == 200
+    assert "session" in login_resp.cookies
+
+    # Use the session cookie to hit /me.
+    client.cookies.update(login_resp.cookies)
+    me_resp = client.get("/api/v1/auth/me")
+    assert me_resp.status_code == 200
+    assert me_resp.json()["email"] == email
+
+    # Logout (should clear the cookie server-side and in the TestClient). 
+    logout_resp = client.post("/api/v1/auth/logout")
+    assert logout_resp.status_code == 200
+    assert "session" not in logout_resp.cookies
+
+
+def test_login_invalid_credentials(client):
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "doesnotexist@example.com", "password": "x"},
+    )
+    assert resp.status_code == 401
+
+
+def test_me_requires_auth(client):
+    resp = client.get("/api/v1/auth/me")
+    assert resp.status_code == 401
+
+
+# File: ./backend/tests/conftest.py
+import os
+import sys
+
+import pytest
+
+# Ensure the backend package directory is on sys.path when pytest runs from the repo root.
+HERE = os.path.dirname(__file__)
+BACKEND_ROOT = os.path.abspath(os.path.join(HERE, ".."))
+if BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, BACKEND_ROOT)
+
+from fastapi.testclient import TestClient
+
+from app import create_app
+from db.base import Base
+from db.engine import engine
+from db.session import SessionLocal, get_db
+
+
+@pytest.fixture(scope="session")
+def app():
+    """Create a FastAPI app and ensure the database schema is present."""
+    # Ensure schema exists before tests run.
+    Base.metadata.create_all(bind=engine)
+
+    app = create_app()
+    yield app
+
+    # Tear down schema after tests.
+    Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture(scope="function")
+def db_session():
+    """Provide a database session that is rolled back after each test."""
+    connection = engine.connect()
+    transaction = connection.begin()
+
+    session = SessionLocal(bind=connection)
+
+    yield session
+
+    session.close()
+    transaction.rollback()
+    connection.close()
+
+
+@pytest.fixture(scope="function")
+def client(app, db_session):
+    """FastAPI test client that uses a transactional DB session."""
+
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = override_get_db
+    return TestClient(app)
+
+
 # File: ./backend/app/__init__.py
 from os import getenv
 from fastapi import FastAPI
@@ -905,7 +1026,7 @@ class RunBase(BaseModel):
 
 
 # File: ./backend/app/schemas/auth.py
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -915,7 +1036,7 @@ class UserRegister(BaseModel):
     first_name: str
     last_name: str
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=8, max_length=72)
 
 class UserLogout(BaseModel):
     pass
@@ -1100,7 +1221,7 @@ from sqlalchemy.orm import Session
 from db.models.users import Users
 from db.models.sessions import Sessions as UserSessions
 from app.api.utils.auth import hash_password, verify_password
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from core.config import settings
 from app.services.users import UserService
@@ -1118,7 +1239,7 @@ class AuthService:
         if not verify_password(password, user.password):
             return None
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         exp = now + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
 
         session_secret = SessionService(self.db).create_session(user.id, exp, now)
@@ -1133,7 +1254,7 @@ class AuthService:
         if not session:
             return False
         
-        if session.expires_at < datetime.utcnow():
+        if session.expires_at < datetime.now(timezone.utc):
             SessionService(self.db).delete_session(session_secret)
             return False
         
@@ -1256,6 +1377,36 @@ api_router.include_router(user_type.router)
 api_router.include_router(users.router)
 
 # File: ./backend/app/api/utils/users.py
+from datetime import datetime
+
+from fastapi import Depends, Cookie, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.services.session import SessionService
+from app.services.users import UserService
+from db.session import get_db
+
+
+def get_current_user(
+    session: str | None = Cookie(None),
+    db: Session = Depends(get_db),
+):
+    if not session:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    session_obj = SessionService(db).get_session(session)
+    if not session_obj:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    if session_obj.expires_at < datetime.utcnow():
+        SessionService(db).delete_session(session)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+
+    user = UserService(db).get_user_by_id(session_obj.user_id)
+    if not user or not user.active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+
+    return user
 
 
 # File: ./backend/app/api/utils/auth.py
@@ -1280,26 +1431,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def get_current_user(
-    session: str | None = Cookie(None),
-    db: Session = Depends(get_db),
-):
-    if not session:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    session_obj = SessionService(db).get_session(session)
-    if not session_obj:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-
-    if session_obj.expires_at < datetime.utcnow():
-        SessionService(db).delete_session(session)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
-
-    user = UserService(db).get_user_by_id(session_obj.user_id)
-    if not user or not user.active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-
-    return user
 
 # File: ./backend/app/api/utils/sessions.py
 import hashlib
@@ -1448,7 +1580,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, Cookie
 from typing import Optional
 from datetime import datetime, timedelta
 from app.schemas.users import UserOut
-from app.api.utils.auth import get_current_user
+from app.api.utils.users import get_current_user
 from db.session import get_db
 from db.models.users import Users
 from app.services.auth import AuthService
