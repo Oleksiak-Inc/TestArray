@@ -35,7 +35,7 @@ class SessionService(BaseService):
             return None
         
         self.db.delete(session)
-        self.commit_and_refresh(session)
+        self.db.commit()
         return session
     
     def delete_all_sessions(self, user_id: int):

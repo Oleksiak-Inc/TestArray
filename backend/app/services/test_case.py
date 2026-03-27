@@ -70,18 +70,21 @@ class TestCaseService(BaseService):
     def create_test_case_and_version(self, test_case_data, test_case_version_data, test_suite_id: int = None):
         test_case = TestCases(**test_case_data)
         self.db.add(test_case)
-        self.commit_and_refresh(test_case)
+        self.db.flush()  # Get ID without committing
         test_case_version_data["test_case_id"] = test_case.id
         test_case_version = TestCaseVersions(**test_case_version_data)
         self.db.add(test_case_version)
-        self.commit_and_refresh(test_case_version)
+        self.db.flush()
 
         if test_suite_id:
             suitcase_data = {
                 "test_case_id": test_case.id,
                 "test_suite_id": test_suite_id
             }
+            suitcase = Suitcases(**suitcase_data)
+            self.db.add(suitcase)
 
-            SuitcaseService(self.db).create_suitcase(suitcase_data)
-
+        self.db.commit()
+        self.db.refresh(test_case)
+        self.db.refresh(test_case_version)
         return test_case, test_case_version

@@ -48,6 +48,8 @@ class TestSuiteService(BaseService):
     
     def update_test_suite(self, test_suite_id, test_suite_data):
         test_suite = self.get_test_suite(test_suite_id)
+        if not test_suite:
+            return None
         for key, value in test_suite_data.items():
             setattr(test_suite, key, value)
         self.commit_and_refresh(test_suite)
