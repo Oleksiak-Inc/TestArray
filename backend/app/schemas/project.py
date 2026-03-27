@@ -18,3 +18,9 @@ class ProjectOut(ProjectBase):
 
     class Config:
         from_attributes = True
+
+class ProjectWithClient(ProjectOut):
+    client_id: int
+
+    class Config:
+        from_attributes = True

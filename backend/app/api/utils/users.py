@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import Depends, Cookie, HTTPException, status
 from sqlalchemy.orm import Session
@@ -19,7 +19,7 @@ def get_current_user(
     if not session_obj:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
 
-    if session_obj.expires_at < datetime.utcnow():
+    if session_obj.expires_at < datetime.now(timezone.utc):
         SessionService(db).delete_session(session)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
 

@@ -1,9 +1,8 @@
 from db.models.users import Users
 from sqlalchemy.orm import Session
+from utils.service import BaseService
 
-class UserService:
-    def __init__(self, db: Session):
-        self.db = db
+class UserService(BaseService):
 
     def get_user_by_email(self, email: str):
         user = self.db.query(Users).filter(Users.email == email).first()

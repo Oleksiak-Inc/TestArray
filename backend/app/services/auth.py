@@ -8,10 +8,10 @@ from core.config import settings
 from app.services.users import UserService
 from app.services.session import SessionService
 from app.services.user_type import UserTypeService
+from utils.service import BaseService
 
-class AuthService:
-    def __init__(self, db: Session):
-        self.db = db
+
+class AuthService(BaseService):
 
     def login_user(self, email: str, password: str):
         user = UserService(self.db).get_user_by_email(email)
@@ -26,7 +26,7 @@ class AuthService:
         session_secret = SessionService(self.db).create_session(user.id, exp, now)
 
         user.last_login_at = now
-        self.db.commit()
+        self.commit_and_refresh(user)
 
         return {"user": user, "access_token": session_secret}
     
@@ -64,8 +64,7 @@ class AuthService:
             user_type_id=regular_user_type.id
             )
         self.db.add(new_user)
-        self.db.commit()
-        self.db.refresh(new_user)
+        self.commit_and_refresh(new_user)
         return new_user
 
     def logout_user(self, session_secret: str):

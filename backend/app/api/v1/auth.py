@@ -32,7 +32,7 @@ async def login(
         key="session",
         value=result["access_token"],
         httponly=True,
-        secure=True,
+        #secure=True,
         samesite="lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_SECONDS
     )
