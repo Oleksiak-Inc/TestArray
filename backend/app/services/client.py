@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from db.models.clients import Clients
 from db.models.projects import Projects
-from utils.service import BaseService
+from .utils.service import BaseService
 
 class ClientService(BaseService):
     def get_client(self, client_id: int):

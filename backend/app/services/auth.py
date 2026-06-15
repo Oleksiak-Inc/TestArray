@@ -8,7 +8,7 @@ from core.config import settings
 from app.services.users import UserService
 from app.services.session import SessionService
 from app.services.user_type import UserTypeService
-from utils.service import BaseService
+from .utils.service import BaseService
 
 
 class AuthService(BaseService):

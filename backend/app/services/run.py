@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 from db.models.clients import Clients
 from db.models.projects import Projects
 from db.models.runs import Runs
-from utils.service import BaseService
+from .utils.service import BaseService
 
 class RunService(BaseService):
     

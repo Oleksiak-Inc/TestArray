@@ -5,7 +5,7 @@ from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
 
-from utils.service import BaseService
+from .utils.service import BaseService
 
 
 class SuitcaseService(BaseService):

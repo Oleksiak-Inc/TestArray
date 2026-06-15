@@ -1,6 +1,6 @@
 from db.models.users import Users
 from sqlalchemy.orm import Session
-from utils.service import BaseService
+from .utils.service import BaseService
 
 class UserService(BaseService):
 

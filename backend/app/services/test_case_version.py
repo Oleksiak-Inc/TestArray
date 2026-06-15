@@ -4,7 +4,7 @@ from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
 
 from sqlalchemy.orm import Session, joinedload
-from utils.service import BaseService
+from .utils.service import BaseService
 
 class TestCaseVersionService(BaseService):
     def get_test_case_version(self, test_case_version_id: int):

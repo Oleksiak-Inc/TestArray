@@ -5,7 +5,7 @@ from db.models.test_case_versions import TestCaseVersions
 
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, text
-from utils.service import BaseService
+from .utils.service import BaseService
 
 class TestSuiteService(BaseService):
     def get_test_suite(self, test_suite_id: int):

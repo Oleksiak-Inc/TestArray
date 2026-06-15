@@ -1,3 +1,17 @@
+# File: ./backend/identify_encoding.py
+import os
+
+for root, _, files in os.walk("."):
+    for f in files:
+        if f.endswith(".py"):
+            path = os.path.join(root, f)
+            try:
+                with open(path, encoding="utf-8") as file:
+                    file.read()
+            except UnicodeDecodeError:
+                print("Bad encoding in:", path)
+
+
 # File: ./backend/run.py
 import uvicorn
 from app import create_app
@@ -14,19 +28,85 @@ if __name__ == "__main__":
         port=settings.SERVER_PORT
     )
 
-# File: ./backend/identify_encoding.py
-import os
+# File: ./backend/core/startup.py
+from db.session import SessionLocal
+from db.models.user_types import UserTypes
 
-for root, _, files in os.walk("."):
-    for f in files:
-        if f.endswith(".py"):
-            path = os.path.join(root, f)
-            try:
-                with open(path, encoding="utf-8") as file:
-                    file.read()
-            except UnicodeDecodeError:
-                print("Bad encoding in:", path)
 
+def init_db() -> None:
+    """Initialize required reference data.
+
+    Called on application startup.
+    """
+    db = SessionLocal()
+    try:
+        # Ensure there is at least a "regular" user type for registrations.
+        # Add other base structs here as needed.
+        for name, description in [("admin", "Admin user"),("regular", "Regular user")]:
+            existing = db.query(UserTypes).filter(UserTypes.name == name).first()
+            if not existing:
+                db.add(UserTypes(name=name, description=description))
+        db.commit()
+    finally:
+        db.close()
+
+
+# File: ./backend/core/config.py
+from pathlib import Path
+from typing import Optional
+from pydantic import Field, PostgresDsn
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    APP_NAME: str = "TestArray"
+    API_V1_STR: str = Field(..., env="API_V1_STR")
+
+    #SECRET_KEY: str = Field(..., env="SECRET_KEY")
+    #JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_SECONDS: int = 60 * 60 * 12
+    
+    SERVER_HOST: str = Field(..., env="SERVER_HOST")
+    SERVER_PORT: int = Field(..., env="SERVER_PORT")
+
+    POSTGRES_SERVER: str = Field(..., env="POSTGRES_SERVER")
+    DATABASE_URL: Optional[PostgresDsn] = None
+    POSTGRES_PORT: str = Field(..., env="POSTGRES_PORT")
+    POSTGRES_DB: str = Field(..., env="POSTGRES_DB")
+    POSTGRES_USER: str = Field(..., env="POSTGRES_USER")
+    POSTGRES_PASSWORD: str = Field(..., env="POSTGRES_PASSWORD")
+
+    FRONTEND_ORIGINS: str = Field(..., env="FRONTEND_ORIGINS")
+    #JWT_SECRET_KEY: str = Field(..., env="JWT_SECRET_KEY")
+
+    UPLOAD_DIR: str = Field(..., env="UPLOAD_DIR")
+    MAX_FILE_SIZE: int = 100 * 1024 * 1024
+    ALLOWED_FILE_EXTENSIONS: set = {'.txt', '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.csv', '.json', '.xml'}
+
+    @property
+    def get_upload_path(self) -> Path:
+        upload_path = Path(self.UPLOAD_DIR)
+        upload_path.mkdir(parents=True, exist_ok=True)
+        return upload_path
+    
+    @property
+    def database_url(self) -> str:
+        if self.DATABASE_URL:
+            return str(self.DATABASE_URL)
+        return str(PostgresDsn.build(
+            scheme="postgresql+psycopg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_SERVER,
+            port=int(self.POSTGRES_PORT) if self.POSTGRES_PORT else None,
+            path=self.POSTGRES_DB or None,
+        ))
+
+    class Config:
+        case_sensitive = True
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+settings = Settings()
 
 # File: ./backend/db/engine.py
 from sqlalchemy import create_engine
@@ -69,6 +149,138 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
+# File: ./backend/db/models/users.py
+from sqlalchemy import Column, Index, Integer, String, Boolean, DateTime, ForeignKey, func
+from sqlalchemy.orm import relationship
+from db.base import Base
+
+class Users(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
+    user_group_id = Column(Integer, ForeignKey("user_groups.id", use_alter=True), nullable=True)
+    user_type_id = Column(Integer, ForeignKey("user_types.id"), nullable=False)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    email = Column(String, nullable=False, unique=True)
+    password = Column(String, nullable=False)
+
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_login_at = Column(DateTime(timezone=True))
+
+    # ---- relationships ----
+    user_type = relationship(
+        "UserTypes", 
+        foreign_keys=[user_type_id], 
+        back_populates="users")
+
+    user_group = relationship(
+        "UserGroups",
+        foreign_keys=[user_group_id],
+        back_populates="members"
+    )
+
+    groups_created = relationship(
+        "UserGroups",
+        foreign_keys="UserGroups.created_by_id",
+        back_populates="created_by"
+    )
+
+    groups_owned = relationship(
+        "UserGroups",
+        foreign_keys="UserGroups.owner_id",
+        back_populates="owner"
+    )
+
+    uploads = relationship(
+        "Attachments", 
+        foreign_keys="Attachments.uploaded_by", 
+        back_populates="uploader")
+    
+    executions = relationship(
+        "Executions", 
+        foreign_keys="Executions.executed_by", 
+        back_populates="executor")
+    
+    created_test_case_versions = relationship(
+        "TestCaseVersions", 
+        foreign_keys="TestCaseVersions.created_by", 
+        back_populates="creator")
+    
+    sessions = relationship(
+        "Sessions",
+        foreign_keys="Sessions.user_id", 
+        back_populates="user")
+    
+    __table_args__ = (
+        Index("user_user_type_idx", "user_type_id"),
+        Index("user_user_group_idx", "user_group_id"),
+    )
+
+# File: ./backend/db/models/test_suites.py
+from db.base import Base
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import relationship
+
+class TestSuites(Base):
+    __tablename__ = "test_suites"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True)
+
+    suitcases = relationship(
+        "Suitcases", 
+        back_populates="test_suite",
+        foreign_keys="Suitcases.test_suite_id"
+    )
+
+# File: ./backend/db/models/executions.py
+from sqlalchemy import Column, Index, Integer, Text, DateTime, ForeignKey, UniqueConstraint
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Executions(Base):
+    __tablename__ = "executions"
+
+    id = Column(Integer, primary_key=True)
+
+    device_id = Column(Integer, ForeignKey("devices.id",use_alter=True), nullable=False)
+    run_id = Column(Integer, ForeignKey("runs.id",use_alter=True), nullable=False)
+    test_case_version_id = Column(Integer, ForeignKey("test_case_versions.id",use_alter=True), nullable=False)
+
+    executed_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
+    status_id = Column(Integer, ForeignKey("statuses.id",use_alter=True), nullable=False)
+
+    attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
+
+    actual_result = Column(Text)
+    executed_at = Column(DateTime(timezone=True))
+
+    execution_order = Column(Integer, nullable=False)
+
+    device = relationship("Devices", back_populates="executions", foreign_keys=[device_id])
+    run = relationship("Runs", back_populates="executions", foreign_keys=[run_id])
+    test_case_version = relationship("TestCaseVersions", back_populates="executions", foreign_keys=[test_case_version_id])
+    executor = relationship("Users", foreign_keys=[executed_by], back_populates="executions")
+    status = relationship("Statuses", back_populates="executions", foreign_keys=[status_id])
+    attachment = relationship("Attachments", back_populates="executions", foreign_keys=[attachment_id])
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "test_case_version_id",
+            name="execution_run_version_unique"
+        ),
+        Index("execution_status_idx", "status_id"),
+        Index("execution_executor_idx", "executed_by"),
+        Index("execution_device_idx", "device_id"),
+        Index("execution_attachment_idx", "attachment_id"),
+        Index("execution_run_idx", "run_id"),
+        Index("execution_test_case_version_idx", "test_case_version_id"),
+    )
+
 # File: ./backend/db/models/scenarios.py
 from sqlalchemy import Column, Index, Integer, String
 from db.base import Base
@@ -84,23 +296,148 @@ class Scenarios(Base):
 
     
 
-# File: ./backend/db/models/user_types.py
-from sqlalchemy import Column, Index, Integer, String, Text
+# File: ./backend/db/models/status_sets.py
+from sqlalchemy import Column, Index, Integer, String
 from db.base import Base
 from sqlalchemy.orm import relationship
 
-class UserTypes(Base):
-    __tablename__ = "user_types"
+class StatusSets(Base):
+    __tablename__ = "status_sets"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)
-    description = Column(Text)
+    name = Column(String, unique=True)
 
-    # ---- relationships ----
-    users = relationship(
+    statuses = relationship(
+        "Statuses",
+        back_populates="status_set",
+        foreign_keys="Statuses.status_set_id"
+    )
+    
+    test_cases = relationship(
+        "TestCases",
+        back_populates="status_set",
+        foreign_keys="TestCases.status_set_id"
+    )
+
+
+# File: ./backend/db/models/sessions.py
+from db.base import Base
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, func
+from sqlalchemy.orm import relationship
+
+
+class Sessions(Base):
+    __tablename__ = "sessions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
+    token = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    user = relationship(
         "Users",
-        foreign_keys="Users.user_type_id",
-        back_populates="user_type"
+        foreign_keys=[user_id], 
+        back_populates="sessions")
+
+    __table_args__ = (
+        Index("session_user_id_idx", "user_id"),
+        Index("session_token_idx", "token"),
+    )
+
+# File: ./backend/db/models/test_cases.py
+from sqlalchemy import Column, Index, Integer, ForeignKey
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class TestCases(Base):
+    __tablename__ = "test_cases"
+
+    id = Column(Integer, primary_key=True)
+    scenario_id = Column(Integer, ForeignKey("scenarios.id"), nullable=False)
+    status_set_id = Column(Integer, ForeignKey("status_sets.id"), nullable=False)
+    scenario = relationship("Scenarios", back_populates="test_cases", foreign_keys=[scenario_id])
+    status_set = relationship("StatusSets", back_populates="test_cases", foreign_keys=[status_set_id])
+    versions = relationship("TestCaseVersions", back_populates="test_case", foreign_keys="TestCaseVersions.test_case_id")
+    suitcases = relationship("Suitcases", back_populates="test_case", foreign_keys="Suitcases.test_case_id")
+
+    __table_args__ = (
+        Index("test_case_scenario_idx", "scenario_id"),
+        Index("test_case_status_set_idx", "status_set_id"),
+    )
+
+# File: ./backend/db/models/__init__.py
+from .users import Users
+from .projects import Projects
+from .devices import Devices
+from .clients import Clients
+from .attachments import Attachments
+from .resolutions import Resolutions
+from .executions import Executions
+from .runs import Runs
+from .test_cases import TestCases
+from .test_case_versions import TestCaseVersions
+from .test_suites import TestSuites
+from .suitcases import Suitcases
+from .statuses import Statuses
+from .status_sets import StatusSets
+from .scenarios import Scenarios
+from .user_groups import UserGroups
+from .user_types import UserTypes
+from .sessions import Sessions
+
+# File: ./backend/db/models/projects.py
+from sqlalchemy import Column, Index, Integer, String, ForeignKey
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Projects(Base):
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    client_id = Column(Integer, ForeignKey("clients.id",use_alter=True), nullable=False)
+
+    client = relationship("Clients", back_populates="projects", foreign_keys=[client_id])
+    devices = relationship("Devices", back_populates="project", foreign_keys="Devices.project_id")
+
+    runs = relationship("Runs", back_populates="project", foreign_keys="Runs.project_id")
+
+    __table_args__ = (
+        Index("project_name_idx", "name"),
+    )
+
+# File: ./backend/db/models/test_case_versions.py
+from sqlalchemy import Column, Index, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
+from db.base import Base
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+
+class TestCaseVersions(Base):
+    __tablename__ = "test_case_versions"
+
+    id = Column(Integer, primary_key=True)
+    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+
+    release_ready = Column(Boolean, default=False)
+    version = Column(Integer, nullable=False)
+    name = Column(String)
+    description = Column(Text)
+    steps = Column(Text)
+    expected_result = Column(Text)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    test_case = relationship("TestCases", back_populates="versions", foreign_keys=[test_case_id])
+    creator = relationship("Users", foreign_keys=[created_by], back_populates="created_test_case_versions")
+    executions = relationship("Executions", back_populates="test_case_version", foreign_keys="Executions.test_case_version_id")
+
+    __table_args__ = (
+        UniqueConstraint("test_case_id", "version", name="test_case_version_unique"),
+        Index("test_case_version_test_case_idx", "test_case_id"),
+        Index("test_case_version_created_at_idx", "created_at"),
+        Index("test_case_version_created_by_idx", "created_by"),
     )
 
 # File: ./backend/db/models/devices.py
@@ -189,6 +526,72 @@ class Statuses(Base):
         Index("status_status_set_idx", "status_set_id"),
     )
 
+# File: ./backend/db/models/runs.py
+from sqlalchemy import Column, Index, Integer, String, DateTime, Text, ForeignKey
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Runs(Base):
+    __tablename__ = "runs"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+
+    started_at = Column(DateTime(timezone=True))
+    done_at = Column(DateTime(timezone=True))
+
+    test_suite_metadata = Column(Text)
+
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+
+    project = relationship("Projects", back_populates="runs", foreign_keys=[project_id])
+    executions = relationship("Executions", back_populates="run", foreign_keys="Executions.run_id")
+
+    __table_args__ = (
+        Index("run_name_idx", "name"),
+        Index("run_project_idx", "project_id"),
+    )
+
+# File: ./backend/db/models/suitcases.py
+from sqlalchemy import Column, ForeignKey, Index, Integer, UniqueConstraint
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class Suitcases(Base):
+    __tablename__ = "suitcases"
+
+    id = Column(Integer, primary_key=True)
+    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
+    test_suite_id = Column(Integer, ForeignKey("test_suites.id"), nullable=False)
+
+    test_case = relationship("TestCases", back_populates="suitcases", foreign_keys=[test_case_id])
+    test_suite = relationship("TestSuites", back_populates="suitcases", foreign_keys=[test_suite_id])
+
+    __table_args__ = (
+        UniqueConstraint("test_case_id", "test_suite_id"),
+        Index("suitcase_test_case_idx", "test_case_id"),
+        Index("suitcase_test_suite_idx", "test_suite_id"),
+    )
+
+# File: ./backend/db/models/user_types.py
+from sqlalchemy import Column, Index, Integer, String, Text
+from db.base import Base
+from sqlalchemy.orm import relationship
+
+class UserTypes(Base):
+    __tablename__ = "user_types"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False)
+    description = Column(Text)
+
+    # ---- relationships ----
+    users = relationship(
+        "Users",
+        foreign_keys="Users.user_type_id",
+        back_populates="user_type"
+    )
+
 # File: ./backend/db/models/resolutions.py
 from sqlalchemy import Column, Integer, UniqueConstraint
 from db.base import Base
@@ -211,74 +614,21 @@ class Resolutions(Base):
         UniqueConstraint("h", "w", name="resolutions_hw_unique"),
     )
 
-# File: ./backend/db/models/users.py
-from sqlalchemy import Column, Index, Integer, String, Boolean, DateTime, ForeignKey, func
-from sqlalchemy.orm import relationship
+# File: ./backend/db/models/clients.py
+from sqlalchemy import Column, Index, Integer, String
 from db.base import Base
+from sqlalchemy.orm import relationship
 
-class Users(Base):
-    __tablename__ = "users"
+class Clients(Base):
+    __tablename__ = "clients"
 
     id = Column(Integer, primary_key=True)
-    # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
-    user_group_id = Column(Integer, ForeignKey("user_groups.id", use_alter=True), nullable=True)
-    user_type_id = Column(Integer, ForeignKey("user_types.id"), nullable=False)
-    first_name = Column(String, nullable=False)
-    last_name = Column(String, nullable=False)
-    email = Column(String, nullable=False, unique=True)
-    password = Column(String, nullable=False)
+    name = Column(String, unique=True, nullable=False) 
 
-    active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_login_at = Column(DateTime(timezone=True))
-
-    # ---- relationships ----
-    user_type = relationship(
-        "UserTypes", 
-        foreign_keys=[user_type_id], 
-        back_populates="users")
-
-    user_group = relationship(
-        "UserGroups",
-        foreign_keys=[user_group_id],
-        back_populates="members"
-    )
-
-    groups_created = relationship(
-        "UserGroups",
-        foreign_keys="UserGroups.created_by_id",
-        back_populates="created_by"
-    )
-
-    groups_owned = relationship(
-        "UserGroups",
-        foreign_keys="UserGroups.owner_id",
-        back_populates="owner"
-    )
-
-    uploads = relationship(
-        "Attachments", 
-        foreign_keys="Attachments.uploaded_by", 
-        back_populates="uploader")
-    
-    executions = relationship(
-        "Executions", 
-        foreign_keys="Executions.executed_by", 
-        back_populates="executor")
-    
-    created_test_case_versions = relationship(
-        "TestCaseVersions", 
-        foreign_keys="TestCaseVersions.created_by", 
-        back_populates="creator")
-    
-    sessions = relationship(
-        "Sessions",
-        foreign_keys="Sessions.user_id", 
-        back_populates="user")
-    
-    __table_args__ = (
-        Index("user_user_type_idx", "user_type_id"),
-        Index("user_user_group_idx", "user_group_id"),
+    projects = relationship(
+        "Projects",
+        back_populates="client",
+        foreign_keys="Projects.client_id"
     )
 
 # File: ./backend/db/models/user_groups.py
@@ -320,477 +670,6 @@ class UserGroups(Base):
         Index("user_group_created_by_idx", "created_by_id"),
     )
 
-# File: ./backend/db/models/suitcases.py
-from sqlalchemy import Column, ForeignKey, Index, Integer, UniqueConstraint
-from db.base import Base
-from sqlalchemy.orm import relationship
-
-class Suitcases(Base):
-    __tablename__ = "suitcases"
-
-    id = Column(Integer, primary_key=True)
-    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
-    test_suite_id = Column(Integer, ForeignKey("test_suites.id"), nullable=False)
-
-    test_case = relationship("TestCases", back_populates="suitcases", foreign_keys=[test_case_id])
-    test_suite = relationship("TestSuites", back_populates="suitcases", foreign_keys=[test_suite_id])
-
-    __table_args__ = (
-        UniqueConstraint("test_case_id", "test_suite_id"),
-        Index("suitcase_test_case_idx", "test_case_id"),
-        Index("suitcase_test_suite_idx", "test_suite_id"),
-    )
-
-# File: ./backend/db/models/__init__.py
-from .users import Users
-from .projects import Projects
-from .devices import Devices
-from .clients import Clients
-from .attachments import Attachments
-from .resolutions import Resolutions
-from .executions import Executions
-from .runs import Runs
-from .test_cases import TestCases
-from .test_case_versions import TestCaseVersions
-from .test_suites import TestSuites
-from .suitcases import Suitcases
-from .statuses import Statuses
-from .status_sets import StatusSets
-from .scenarios import Scenarios
-from .user_groups import UserGroups
-from .user_types import UserTypes
-from .sessions import Sessions
-
-# File: ./backend/db/models/test_cases.py
-from sqlalchemy import Column, Index, Integer, ForeignKey
-from db.base import Base
-from sqlalchemy.orm import relationship
-
-class TestCases(Base):
-    __tablename__ = "test_cases"
-
-    id = Column(Integer, primary_key=True)
-    scenario_id = Column(Integer, ForeignKey("scenarios.id"), nullable=False)
-    status_set_id = Column(Integer, ForeignKey("status_sets.id"), nullable=False)
-    scenario = relationship("Scenarios", back_populates="test_cases", foreign_keys=[scenario_id])
-    status_set = relationship("StatusSets", back_populates="test_cases", foreign_keys=[status_set_id])
-    versions = relationship("TestCaseVersions", back_populates="test_case", foreign_keys="TestCaseVersions.test_case_id")
-    suitcases = relationship("Suitcases", back_populates="test_case", foreign_keys="Suitcases.test_case_id")
-
-    __table_args__ = (
-        Index("test_case_scenario_idx", "scenario_id"),
-        Index("test_case_status_set_idx", "status_set_id"),
-    )
-
-# File: ./backend/db/models/projects.py
-from sqlalchemy import Column, Index, Integer, String, ForeignKey
-from db.base import Base
-from sqlalchemy.orm import relationship
-
-class Projects(Base):
-    __tablename__ = "projects"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String)
-    client_id = Column(Integer, ForeignKey("clients.id",use_alter=True), nullable=False)
-
-    client = relationship("Clients", back_populates="projects", foreign_keys=[client_id])
-    devices = relationship("Devices", back_populates="project", foreign_keys="Devices.project_id")
-
-    runs = relationship("Runs", back_populates="project", foreign_keys="Runs.project_id")
-
-    __table_args__ = (
-        Index("project_name_idx", "name"),
-    )
-
-# File: ./backend/db/models/executions.py
-from sqlalchemy import Column, Index, Integer, Text, DateTime, ForeignKey, UniqueConstraint
-from db.base import Base
-from sqlalchemy.orm import relationship
-
-class Executions(Base):
-    __tablename__ = "executions"
-
-    id = Column(Integer, primary_key=True)
-
-    device_id = Column(Integer, ForeignKey("devices.id",use_alter=True), nullable=False)
-    run_id = Column(Integer, ForeignKey("runs.id",use_alter=True), nullable=False)
-    test_case_version_id = Column(Integer, ForeignKey("test_case_versions.id",use_alter=True), nullable=False)
-
-    executed_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
-    status_id = Column(Integer, ForeignKey("statuses.id",use_alter=True), nullable=False)
-
-    attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
-
-    actual_result = Column(Text)
-    executed_at = Column(DateTime(timezone=True))
-
-    execution_order = Column(Integer, nullable=False)
-
-    device = relationship("Devices", back_populates="executions", foreign_keys=[device_id])
-    run = relationship("Runs", back_populates="executions", foreign_keys=[run_id])
-    test_case_version = relationship("TestCaseVersions", back_populates="executions", foreign_keys=[test_case_version_id])
-    executor = relationship("Users", foreign_keys=[executed_by], back_populates="executions")
-    status = relationship("Statuses", back_populates="executions", foreign_keys=[status_id])
-    attachment = relationship("Attachments", back_populates="executions", foreign_keys=[attachment_id])
-
-    __table_args__ = (
-        UniqueConstraint(
-            "run_id",
-            "test_case_version_id",
-            name="execution_run_version_unique"
-        ),
-        Index("execution_status_idx", "status_id"),
-        Index("execution_executor_idx", "executed_by"),
-        Index("execution_device_idx", "device_id"),
-        Index("execution_attachment_idx", "attachment_id"),
-        Index("execution_run_idx", "run_id"),
-        Index("execution_test_case_version_idx", "test_case_version_id"),
-    )
-
-# File: ./backend/db/models/status_sets.py
-from sqlalchemy import Column, Index, Integer, String
-from db.base import Base
-from sqlalchemy.orm import relationship
-
-class StatusSets(Base):
-    __tablename__ = "status_sets"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True)
-
-    statuses = relationship(
-        "Statuses",
-        back_populates="status_set",
-        foreign_keys="Statuses.status_set_id"
-    )
-    
-    test_cases = relationship(
-        "TestCases",
-        back_populates="status_set",
-        foreign_keys="TestCases.status_set_id"
-    )
-
-
-# File: ./backend/db/models/test_suites.py
-from db.base import Base
-from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import relationship
-
-class TestSuites(Base):
-    __tablename__ = "test_suites"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True)
-
-    suitcases = relationship(
-        "Suitcases", 
-        back_populates="test_suite",
-        foreign_keys="Suitcases.test_suite_id"
-    )
-
-# File: ./backend/db/models/runs.py
-from sqlalchemy import Column, Index, Integer, String, DateTime, Text, ForeignKey
-from db.base import Base
-from sqlalchemy.orm import relationship
-
-class Runs(Base):
-    __tablename__ = "runs"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String)
-
-    started_at = Column(DateTime(timezone=True))
-    done_at = Column(DateTime(timezone=True))
-
-    test_suite_metadata = Column(Text)
-
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
-
-    project = relationship("Projects", back_populates="runs", foreign_keys=[project_id])
-    executions = relationship("Executions", back_populates="run", foreign_keys="Executions.run_id")
-
-    __table_args__ = (
-        Index("run_name_idx", "name"),
-        Index("run_project_idx", "project_id"),
-    )
-
-# File: ./backend/db/models/clients.py
-from sqlalchemy import Column, Index, Integer, String
-from db.base import Base
-from sqlalchemy.orm import relationship
-
-class Clients(Base):
-    __tablename__ = "clients"
-
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False) 
-
-    projects = relationship(
-        "Projects",
-        back_populates="client",
-        foreign_keys="Projects.client_id"
-    )
-
-# File: ./backend/db/models/test_case_versions.py
-from sqlalchemy import Column, Index, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
-from db.base import Base
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-
-class TestCaseVersions(Base):
-    __tablename__ = "test_case_versions"
-
-    id = Column(Integer, primary_key=True)
-    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-
-    release_ready = Column(Boolean, default=False)
-    version = Column(Integer, nullable=False)
-    name = Column(String)
-    description = Column(Text)
-    steps = Column(Text)
-    expected_result = Column(Text)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    test_case = relationship("TestCases", back_populates="versions", foreign_keys=[test_case_id])
-    creator = relationship("Users", foreign_keys=[created_by], back_populates="created_test_case_versions")
-    executions = relationship("Executions", back_populates="test_case_version", foreign_keys="Executions.test_case_version_id")
-
-    __table_args__ = (
-        UniqueConstraint("test_case_id", "version", name="test_case_version_unique"),
-        Index("test_case_version_test_case_idx", "test_case_id"),
-        Index("test_case_version_created_at_idx", "created_at"),
-        Index("test_case_version_created_by_idx", "created_by"),
-    )
-
-# File: ./backend/db/models/sessions.py
-from db.base import Base
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, func
-from sqlalchemy.orm import relationship
-
-
-class Sessions(Base):
-    __tablename__ = "sessions"
-
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
-    token = Column(String, nullable=False, unique=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-
-    user = relationship(
-        "Users",
-        foreign_keys=[user_id], 
-        back_populates="sessions")
-
-    __table_args__ = (
-        Index("session_user_id_idx", "user_id"),
-        Index("session_token_idx", "token"),
-    )
-
-# File: ./backend/core/config.py
-from pathlib import Path
-from typing import Optional
-from pydantic import Field, PostgresDsn
-from pydantic_settings import BaseSettings
-
-class Settings(BaseSettings):
-    APP_NAME: str = "TestArray"
-    API_V1_STR: str = Field(..., env="API_V1_STR")
-
-    #SECRET_KEY: str = Field(..., env="SECRET_KEY")
-    #JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_SECONDS: int = 60 * 60 * 12
-    
-    SERVER_HOST: str = Field(..., env="SERVER_HOST")
-    SERVER_PORT: int = Field(..., env="SERVER_PORT")
-
-    POSTGRES_SERVER: str = Field(..., env="POSTGRES_SERVER")
-    DATABASE_URL: Optional[PostgresDsn] = None
-    POSTGRES_PORT: str = Field(..., env="POSTGRES_PORT")
-    POSTGRES_DB: str = Field(..., env="POSTGRES_DB")
-    POSTGRES_USER: str = Field(..., env="POSTGRES_USER")
-    POSTGRES_PASSWORD: str = Field(..., env="POSTGRES_PASSWORD")
-
-    FRONTEND_ORIGINS: str = Field(..., env="FRONTEND_ORIGINS")
-    #JWT_SECRET_KEY: str = Field(..., env="JWT_SECRET_KEY")
-
-    UPLOAD_DIR: str = Field(..., env="UPLOAD_DIR")
-    MAX_FILE_SIZE: int = 100 * 1024 * 1024
-    ALLOWED_FILE_EXTENSIONS: set = {'.txt', '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.csv', '.json', '.xml'}
-
-    @property
-    def get_upload_path(self) -> Path:
-        upload_path = Path(self.UPLOAD_DIR)
-        upload_path.mkdir(parents=True, exist_ok=True)
-        return upload_path
-    
-    @property
-    def database_url(self) -> str:
-        if self.DATABASE_URL:
-            return str(self.DATABASE_URL)
-        return str(PostgresDsn.build(
-            scheme="postgresql+psycopg",
-            username=self.POSTGRES_USER,
-            password=self.POSTGRES_PASSWORD,
-            host=self.POSTGRES_SERVER,
-            port=int(self.POSTGRES_PORT) if self.POSTGRES_PORT else None,
-            path=self.POSTGRES_DB or None,
-        ))
-
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
-settings = Settings()
-
-# File: ./backend/core/startup.py
-from db.session import SessionLocal
-from db.models.user_types import UserTypes
-
-
-def init_db() -> None:
-    """Initialize required reference data.
-
-    Called on application startup.
-    """
-    db = SessionLocal()
-    try:
-        # Ensure there is at least a "regular" user type for registrations.
-        # Add other base structs here as needed.
-        for name, description in [("admin", "Admin user"),("regular", "Regular user")]:
-            existing = db.query(UserTypes).filter(UserTypes.name == name).first()
-            if not existing:
-                db.add(UserTypes(name=name, description=description))
-        db.commit()
-    finally:
-        db.close()
-
-
-# File: ./backend/tests/test_auth.py
-from datetime import datetime
-
-import pytest
-
-
-def test_register_and_login_and_me_and_logout(client):
-    # Register a new user.
-    email = f"test-{datetime.utcnow().timestamp()}@example.com"
-    password = "test-password"
-
-    register_resp = client.post(
-        "/api/v1/auth/register",
-        json={
-            "first_name": "Test",
-            "last_name": "User",
-            "email": email,
-            "password": password,
-        },
-    )
-    assert register_resp.status_code == 200
-    assert register_resp.json()["email"] == email
-
-    # Login with the new user and make sure we get a session cookie.
-    login_resp = client.post(
-        "/api/v1/auth/login",
-        json={
-            "email": email,
-            "password": password,
-        },
-    )
-    assert login_resp.status_code == 200
-    assert "session" in login_resp.cookies
-
-    # Use the session cookie to hit /me.
-    client.cookies.update(login_resp.cookies)
-    me_resp = client.get("/api/v1/auth/me")
-    assert me_resp.status_code == 200
-    assert me_resp.json()["email"] == email
-
-    # Logout (should clear the cookie server-side and in the TestClient). 
-    logout_resp = client.post("/api/v1/auth/logout")
-    assert logout_resp.status_code == 200
-    assert "session" not in logout_resp.cookies
-
-
-def test_login_invalid_credentials(client):
-    resp = client.post(
-        "/api/v1/auth/login",
-        json={"email": "doesnotexist@example.com", "password": "x"},
-    )
-    assert resp.status_code == 401
-
-
-def test_me_requires_auth(client):
-    resp = client.get("/api/v1/auth/me")
-    assert resp.status_code == 401
-
-
-# File: ./backend/tests/conftest.py
-import os
-import sys
-
-import pytest
-
-# Ensure the backend package directory is on sys.path when pytest runs from the repo root.
-HERE = os.path.dirname(__file__)
-BACKEND_ROOT = os.path.abspath(os.path.join(HERE, ".."))
-if BACKEND_ROOT not in sys.path:
-    sys.path.insert(0, BACKEND_ROOT)
-
-from fastapi.testclient import TestClient
-
-from app import create_app
-from db.base import Base
-from db.engine import engine
-from db.session import SessionLocal, get_db
-
-
-@pytest.fixture(scope="session")
-def app():
-    """Create a FastAPI app and ensure the database schema is present."""
-    # Ensure schema exists before tests run.
-    Base.metadata.create_all(bind=engine)
-
-    app = create_app()
-    yield app
-
-    # Tear down schema after tests.
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(scope="function")
-def db_session():
-    """Provide a database session that is rolled back after each test."""
-    connection = engine.connect()
-    transaction = connection.begin()
-
-    session = SessionLocal(bind=connection)
-
-    yield session
-
-    session.close()
-    transaction.rollback()
-    connection.close()
-
-
-@pytest.fixture(scope="function")
-def client(app, db_session):
-    """FastAPI test client that uses a transactional DB session."""
-
-    def override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app)
-
-
 # File: ./backend/app/__init__.py
 from os import getenv
 from fastapi import FastAPI
@@ -825,578 +704,6 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix=settings.API_V1_STR)
     
     return app
-
-# File: ./backend/app/schemas/status_set.py
-
-
-# File: ./backend/app/schemas/device.py
-from pydantic import BaseModel, Field
-
-class DeviceBase(BaseModel):
-    name_external: str = Field(..., max_length=255)
-    name_internal: str | None = Field(None, max_length=255)
-    cpu: str | None = Field(None, max_length=255)
-    gpu: str | None = Field(None, max_length=255)
-    ram: int | None = None
-    project_id: int
-
-class DeviceCreate(DeviceBase):
-    pass
-
-class DeviceUpdate(BaseModel):
-    name_external: str | None = Field(None, max_length=255)
-    name_internal: str | None = Field(None, max_length=255)
-    cpu: str | None = Field(None, max_length=255)
-    gpu: str | None = Field(None, max_length=255)
-    ram: int | None = None
-    project_id: int | None = None
-
-class DeviceOut(DeviceBase):
-    id: int
-    name_external: str
-    name_internal: str | None
-    cpu: str | None
-    gpu: str | None
-    ram: int | None
-
-    class Config:
-        from_attributes = True
-
-# File: ./backend/app/schemas/suitcase.py
-
-
-# File: ./backend/app/schemas/test_suite.py
-
-
-# File: ./backend/app/schemas/user_type.py
-from pydantic import BaseModel, Field
-
-class UserTypeBase(BaseModel):
-    name: str = Field(..., max_length=100)
-    description: str | None = None
-
-
-class UserTypeCreate(UserTypeBase):
-    pass
-
-
-class UserTypeUpdate(BaseModel):
-    name: str | None = Field(None, max_length=100)
-    description: str | None = None
-
-
-class UserTypeOut(UserTypeBase):
-    id: int
-
-    class Config:
-        from_attributes = True
-
-# File: ./backend/app/schemas/users.py
-from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
-
-
-class UserCreate(BaseModel):
-    email: EmailStr
-    first_name: str
-    last_name: str
-    password: str = Field(..., min_length=8)
-
-class UserUpdateSelf(BaseModel):
-    first_name: str | None = None
-    last_name: str | None = None
-    email: EmailStr | None = None
-    password: str | None = Field(None, min_length=8)
-
-class UserUpdateAdmin(BaseModel):
-    user_group_id: int | None = None
-    user_type_id: int | None = None
-    active: bool | None = None
-
-class UserOut(BaseModel):
-    id: int
-    email: EmailStr
-    first_name: str
-    last_name: str
-    active: bool
-    user_type_id: int
-    user_group_id: int | None
-    created_at: datetime
-    last_login_at: datetime | None
-
-    class Config:
-        from_attributes = True
-
-# File: ./backend/app/schemas/project.py
-from pydantic import BaseModel, Field
-
-class ProjectBase(BaseModel):
-    name: str = Field(..., max_length=255)
-    client_id: int
-
-class ProjectCreate(ProjectBase):
-    pass
-
-class ProjectUpdate(BaseModel):
-    name: str | None = Field(None, max_length=255)
-    client_id: int | None = None
-
-class ProjectOut(ProjectBase):
-    id: int
-    name: str
-    client_id: int
-
-    class Config:
-        from_attributes = True
-
-class ProjectWithClient(ProjectOut):
-    client_id: int
-
-    class Config:
-        from_attributes = True
-
-# File: ./backend/app/schemas/status.py
-
-
-# File: ./backend/app/schemas/scenario.py
-
-
-# File: ./backend/app/schemas/test_case.py
-
-
-# File: ./backend/app/schemas/attachment.py
-from pydantic import BaseModel
-from typing import Optional, Dict, Any
-from datetime import datetime
-
-class AttachmentBase(BaseModel):
-    resolution_id: Optional[int] = None
-    settings: Optional[Dict[str, Any]] = None
-
-class AttachmentCreateInternal(BaseModel):
-    uploaded_by: int
-    filename: str
-    relative_path: str
-    resolution_id: Optional[int]
-    settings: Optional[dict]
-    presentmon_version: Optional[str]
-
-class AttachmentOut(BaseModel):
-    id: int
-    uploaded_at: datetime
-    uploaded_by: int
-    filename: str
-    
-    class Config:
-        from_attributes = True
-
-
-
-# File: ./backend/app/schemas/test_case_version.py
-
-
-# File: ./backend/app/schemas/user_group.py
-from pydantic import BaseModel, Field
-
-class UserGroupBase(BaseModel):
-    name: str = Field(..., max_length=100)
-
-
-class UserGroupCreate(UserGroupBase):
-    owner_id: int
-
-
-class UserGroupUpdate(BaseModel):
-    name: str | None = Field(None, max_length=100)
-    owner_id: int | None = None
-
-
-class UserGroupOut(UserGroupBase):
-    id: int
-    owner_id: int
-    created_by_id: int
-
-    class Config:
-        from_attributes = True
-
-# File: ./backend/app/schemas/run.py
-from pydantic import BaseModel, Field
-
-class RunBase(BaseModel):
-    name: str = Field(..., max_length=255)
-
-# File: ./backend/app/schemas/execution.py
-
-
-# File: ./backend/app/schemas/session.py
-
-
-# File: ./backend/app/schemas/auth.py
-from pydantic import BaseModel, EmailStr, Field
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-class UserRegister(BaseModel):
-    first_name: str
-    last_name: str
-    email: EmailStr
-    password: str = Field(..., min_length=8, max_length=72)
-
-class UserLogout(BaseModel):
-    pass
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
-class TokenPayload(BaseModel):
-    sub: int   # user id
-    exp: int
-
-
-# File: ./backend/app/schemas/client.py
-from pydantic import BaseModel, Field
-from app.schemas.project import ProjectOut
-
-class ClientBase(BaseModel):
-    name: str = Field(..., max_length=255)
-
-
-class ClientCreate(ClientBase):
-    pass
-
-
-class ClientUpdate(BaseModel):
-    name: str | None = Field(None, max_length=255)
-
-
-class ClientOut(BaseModel):
-    id: int
-    name: str
-
-    class Config:
-        from_attributes = True
-
-
-class ClientWithProjects(ClientOut):
-    projects: list[ProjectOut]
-
-    class Config:
-        from_attributes = True
-
-# File: ./backend/app/schemas/resolution.py
-from pydantic import BaseModel, Field
-
-class ResolutionBase(BaseModel):
-    w: int
-    h: int
-
-class ResolutionCreate(ResolutionBase):
-    pass
-
-class ResolutionUpdate(BaseModel):
-    w: int | None = None
-    h: int | None = None
-
-class ResolutionOut(ResolutionBase):
-    id: int
-    w: int
-    h: int
-
-    class Config:
-        from_attributes = True
-
-# File: ./backend/app/services/status_set.py
-
-
-# File: ./backend/app/services/device.py
-
-
-# File: ./backend/app/services/suitcase.py
-
-
-# File: ./backend/app/services/test_suite.py
-from db.models.test_suites import TestSuites
-from db.models.test_cases import TestCases
-from db.models.suitcases import Suitcases
-from db.models.test_case_versions import TestCaseVersions
-
-from sqlalchemy.orm import Session, joinedload
-from utils.service import BaseService
-
-class TestSuiteService(BaseService):
-    def get_test_suite(self, test_suite_id: int):
-        return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).first()
-    
-    def get_test_suite_with_test_cases(self, test_suite_id: int):
-        return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).options(
-            joinedload(TestSuites.suitcases).joinedload(Suitcases.test_case)
-        ).first()
-    
-    def get_test_suite_with_test_cases_with_latest_test_case_versions(self, test_suite_id: int):
-        return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).options(
-            joinedload(TestSuites.suitcases).joinedload(Suitcases.test_case).joinedload(TestCases.versions).order_by(TestCaseVersions.created_at.desc()).limit(1)
-        )
-
-    def create_test_suite(self, test_suite_data):
-        test_suite = TestSuites(**test_suite_data)
-        self.db.add(test_suite)
-        self.commit_and_refresh(test_suite)
-        return test_suite
-    
-    def update_test_suite(self, test_suite_id, test_suite_data):
-        test_suite = self.get_test_suite(test_suite_id)
-        for key, value in test_suite_data.items():
-            setattr(test_suite, key, value)
-        self.commit_and_refresh(test_suite)
-        return test_suite
-    
-
-
-# File: ./backend/app/services/user_type.py
-from db.models.user_types import UserTypes
-from sqlalchemy.orm import Session
-from utils.service import BaseService
-
-class UserTypeService(BaseService):
-    
-    def get_user_type_by_id(self, user_type_id: int):
-        return self.db.query(UserTypes).filter(UserTypes.id == user_type_id).first()
-    
-    def get_user_type_by_name(self, name: str):
-        return self.db.query(UserTypes).filter(UserTypes.name == name).first()
-    
-    def create_user_type(self, user_type_data):
-        user_type = UserTypes(**user_type_data)
-        self.db.add(user_type)
-        self.commit_and_refresh(user_type)
-        return user_type
-    
-    def update_user_type(self, user_type_id, user_type_data):
-        user_type = self.get_user_type_by_id(user_type_id)
-        for key, value in user_type_data.items():
-            setattr(user_type, key, value)
-        self.commit_and_refresh(user_type)
-        return user_type
-
-# File: ./backend/app/services/users.py
-from db.models.users import Users
-from sqlalchemy.orm import Session
-from utils.service import BaseService
-
-class UserService(BaseService):
-
-    def get_user_by_email(self, email: str):
-        user = self.db.query(Users).filter(Users.email == email).first()
-        if not user:
-            return None
-        return user
-
-    def get_user_by_id(self, user_id: int):
-        return self.db.query(Users).filter(Users.id == user_id).first()
-
-# File: ./backend/app/services/project.py
-from sqlalchemy.orm import Session, joinedload
-from db.models.clients import Clients
-from db.models.projects import Projects
-from utils.service import BaseService
-
-class ProjectService(BaseService):
-
-    def get_project(self, project_id: int):
-        return self.db.query(Projects).filter(Projects.id == project_id).first()
-    
-    def get_project_with_client(self, project_id: int):
-        return self.db.query(Projects).filter(Projects.id == project_id).options(
-            joinedload(Projects.client)
-        ).first()
-    
-    def create_project(self, project_data):
-        project = Projects(**project_data)
-        self.db.add(project)
-        self.commit_and_refresh(project)
-        return project
-    
-    def update_project(self, project_id: int, project_data):
-        project = self.get_project(project_id)
-        for key, value in project_data.items():
-            setattr(project, key, value)
-        self.commit_and_refresh(project)
-        return project
-    
-    
-
-# File: ./backend/app/services/status.py
-
-
-# File: ./backend/app/services/scenario.py
-
-
-# File: ./backend/app/services/test_case.py
-from db.models.test_suites import TestSuites
-from db.models.test_cases import TestCases
-from db.models.suitcases import Suitcases
-from db.models.test_case_versions import TestCaseVersions
-
-from sqlalchemy.orm import Session, joinedload
-from utils.service import BaseService
-
-class TestCaseService(BaseService):
-    def get_test_case(self, test_case_id: int):
-        return self.db.query(TestCases).filter(TestCases.id == test_case_id).first()
-    
-    def get_test_case_with_testsuite(self, test_case_id: int):
-        return self.db.query(TestCases).filter(TestCases.id == test_case_id).options(
-            joinedload(TestCases.suitcases).joinedload(Suitcases.test_suite)
-        ).first()
-    
-    def get_test_case_with_testsuite_with_latest_test_case_version(self, test_case_id: int):
-        return self.db.query(TestCases).filter(TestCases.id == test_case_id).options(
-            joinedload(TestCases.suitcases).
-            joinedload(Suitcases.test_suite).
-            joinedload(TestCases.versions).order_by(
-                TestCaseVersions.created_at.desc()
-            ).limit(1)
-        )
-    
-    def create_test_case(self, test_case_data):
-        test_case = TestCases(**test_case_data)
-        self.db.add(test_case)
-        self.commit_and_refresh(test_case)
-        return test_case
-    
-
-
-# File: ./backend/app/services/attachment.py
-
-
-# File: ./backend/app/services/test_case_version.py
-from db.models.test_suites import TestSuites
-from db.models.test_cases import TestCases
-from db.models.suitcases import Suitcases
-from db.models.test_case_versions import TestCaseVersions
-
-from sqlalchemy.orm import Session, joinedload
-from utils.service import BaseService
-
-
-
-
-class TestCaseVersionService(BaseService):
-    def get_test_case_version(self, test_case_version_id: int):
-        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).first()
-    
-    def get_test_case_version_with_test_case(self, test_case_version_id: int):
-        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
-            joinedload(TestCaseVersions.test_case)
-        ).first()
-    
-    def get_test_case_version_with_test_case_with_test_suite(self, test_case_version_id: int):
-        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
-            joinedload(TestCaseVersions.test_case).joinedload(TestCases.suitcases).joinedload(Suitcases.test_suite)
-        ).first()
-    
-    def get_test_case_version_by_test_case_id(self, test_case_id: int):
-        return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id).first()
-    
-    def get_latest_release_ready_test_case_version_by_test_case_id(self, test_case_id: int):
-        return self.db.query(TestCaseVersions).filter(
-            TestCaseVersions.test_case_id == test_case_id,
-            TestCaseVersions.release_ready == True
-        ).order_by(TestCaseVersions.created_at.desc()).first()
-    
-
-# File: ./backend/app/services/user_group.py
-
-
-# File: ./backend/app/services/run.py
-from sqlalchemy.orm import Session, joinedload
-from db.models.clients import Clients
-from db.models.projects import Projects
-from db.models.runs import Runs
-from utils.service import BaseService
-
-class RunService(BaseService):
-    
-    def get_run(self, run_id):
-        return self.db.query(Runs).filter(Runs.id == run_id).first()
-    
-    def get_run_with_project(self, run_id):
-        return self.db.query(Runs).filter(Runs.id == run_id).options(
-            joinedload(Runs.project)
-        ).first()
-    
-    def get_run_with_project_and_client(self, run_id):
-        return self.db.query(Runs).filter(Runs.id == run_id).options(
-            joinedload(Runs.project).joinedload(Projects.client)
-        ).first()
-    
-    def create_run(self, run_data):
-        run = Runs(**run_data)
-        self.db.add(run)
-        self.commit_and_refresh(run)
-        return run
-    
-    def update_run(self, run_id, run_data):
-        run = self.get_run(run_id)
-        for key, value in run_data.items():
-            setattr(run, key, value)
-        self.commit_and_refresh(run)
-        return(run)
-
-# File: ./backend/app/services/execution.py
-
-
-# File: ./backend/app/services/session.py
-
-from datetime import datetime
-from sqlalchemy.orm import Session
-from db.models.sessions import Sessions
-from app.api.utils.sessions import generate_session_secret, hash_session_secret
-from utils.service import BaseService
-
-class SessionService(BaseService):
-
-    def create_session(self, user_id: int, expires_at: datetime, created_at: datetime) -> str:
-        
-        session_secret = generate_session_secret()
-        session_hash = hash_session_secret(session_secret)
-
-        session = Sessions(
-            user_id=user_id,
-            token=session_hash,
-            created_at=created_at,
-            expires_at=expires_at
-        )
-        self.commit_and_refresh(session)
-        return session_secret
-    
-    def get_session(self, session_secret: str):
-        session_hash = hash_session_secret(session_secret)
-        session = self.db.query(Sessions).filter(Sessions.token == session_hash).first()
-        if not session:
-            return None
-        return session
-    
-    def delete_session(self, session_secret: str):
-        session = self.get_session(session_secret)
-        
-        if not session:
-            return None
-        
-        self.db.delete(session)
-        self.commit_and_refresh(session)
-        return session
-    
-    def delete_all_sessions(self, user_id: int):
-        sessions = self.db.query(Sessions).filter(Sessions.user_id == user_id).all()
-        
-        for session in sessions:
-            self.db.delete(session)
-        self.commit_and_refresh(session)
-        return sessions
 
 # File: ./backend/app/services/auth.py
 from sqlalchemy.orm import Session
@@ -1478,6 +785,159 @@ class AuthService(BaseService):
 
     
 
+# File: ./backend/app/services/execution.py
+
+
+# File: ./backend/app/services/test_case_version.py
+from db.models.test_suites import TestSuites
+from db.models.test_cases import TestCases
+from db.models.suitcases import Suitcases
+from db.models.test_case_versions import TestCaseVersions
+
+from sqlalchemy.orm import Session, joinedload
+from utils.service import BaseService
+
+class TestCaseVersionService(BaseService):
+    def get_test_case_version(self, test_case_version_id: int):
+        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).first()
+    
+    def get_test_case_version_with_test_case(self, test_case_version_id: int):
+        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
+            joinedload(TestCaseVersions.test_case)
+        ).first()
+    
+    def get_test_case_version_with_test_case_with_test_suites(self, test_case_version_id: int):
+        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
+            joinedload(TestCaseVersions.test_case).joinedload(TestCases.suitcases).joinedload(Suitcases.test_suite)
+        ).first()
+    
+    def get_test_case_version_by_test_case_id(self, test_case_id: int):
+        return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id).first()
+    
+    def get_latest_release_ready_test_case_version_by_test_case_id(self, test_case_id: int):
+        return self.db.query(TestCaseVersions).filter(
+            TestCaseVersions.test_case_id == test_case_id,
+            TestCaseVersions.release_ready == True
+        ).order_by(TestCaseVersions.created_at.desc()).first()
+    
+    def create_test_case_version(self, test_case_version_data):
+        test_case_version = TestCaseVersions(**test_case_version_data)
+        self.db.add(test_case_version)
+        self.commit_and_refresh(test_case_version)
+        return test_case_version
+    
+
+# File: ./backend/app/services/users.py
+from db.models.users import Users
+from sqlalchemy.orm import Session
+from utils.service import BaseService
+
+class UserService(BaseService):
+
+    def get_user_by_email(self, email: str):
+        user = self.db.query(Users).filter(Users.email == email).first()
+        if not user:
+            return None
+        return user
+
+    def get_user_by_id(self, user_id: int):
+        return self.db.query(Users).filter(Users.id == user_id).first()
+
+# File: ./backend/app/services/resolution.py
+
+
+# File: ./backend/app/services/test_case.py
+from sqlalchemy import text
+from sqlalchemy.orm import joinedload
+
+from db.models.test_cases import TestCases
+from db.models.suitcases import Suitcases
+from db.models.test_case_versions import TestCaseVersions
+from app.services.suitcase import SuitcaseService
+
+from utils.service import BaseService
+
+
+class TestCaseService(BaseService):
+
+    def get_test_case(self, test_case_id: int):
+        return (
+            self.db.query(TestCases)
+            .filter(TestCases.id == test_case_id)
+            .first()
+        )
+
+    def get_test_case_with_testsuites(self, test_case_id: int):
+        return (
+            self.db.query(TestCases)
+            .filter(TestCases.id == test_case_id)
+            .options(
+                joinedload(TestCases.suitcases)
+                .joinedload(Suitcases.test_suite)
+            )
+            .first()
+        )
+
+    def get_test_case_with_latest_version(self, test_case_id: int):
+
+        result = self.db.execute(
+            text("""
+                SELECT DISTINCT ON (tc.id)
+                    tc.id AS test_case_id,
+                    tc.name AS test_case_name,
+                    tcv.id AS version_id,
+                    tcv.created_at,
+                    tcv.release_ready
+                FROM test_cases tc
+                JOIN test_case_versions tcv
+                    ON tcv.test_case_id = tc.id
+                WHERE tc.id = :test_case_id
+                  AND tcv.release_ready = true
+                ORDER BY tc.id, tcv.created_at DESC
+            """),
+            {"test_case_id": test_case_id}
+        ).fetchone()
+
+        return result
+
+    def get_test_case_with_all_versions(self, test_case_id: int):
+        return (
+            self.db.query(TestCases)
+            .filter(TestCases.id == test_case_id)
+            .options(
+                joinedload(TestCases.versions)
+            )
+            .first()
+        )
+
+    def create_test_case(self, test_case_data):
+        test_case = TestCases(**test_case_data)
+        self.db.add(test_case)
+        self.commit_and_refresh(test_case)
+        return test_case
+    
+    def create_test_case_and_version(self, test_case_data, test_case_version_data, test_suite_id: int = None):
+        test_case = TestCases(**test_case_data)
+        self.db.add(test_case)
+        self.db.flush()  # Get ID without committing
+        test_case_version_data["test_case_id"] = test_case.id
+        test_case_version = TestCaseVersions(**test_case_version_data)
+        self.db.add(test_case_version)
+        self.db.flush()
+
+        if test_suite_id:
+            suitcase_data = {
+                "test_case_id": test_case.id,
+                "test_suite_id": test_suite_id
+            }
+            suitcase = Suitcases(**suitcase_data)
+            self.db.add(suitcase)
+
+        self.db.commit()
+        self.db.refresh(test_case)
+        self.db.refresh(test_case_version)
+        return test_case, test_case_version
+
 # File: ./backend/app/services/client.py
 from sqlalchemy.orm import Session, joinedload
 from db.models.clients import Clients
@@ -1501,12 +961,277 @@ class ClientService(BaseService):
 
     def update_client(self, client_id: int, client_data):
         client = self.get_client(client_id)
+        if not client:
+            return None
         for key, value in client_data.items():
             setattr(client, key, value)
         self.commit_and_refresh(client)
         return client
 
-# File: ./backend/app/services/resolution.py
+# File: ./backend/app/services/project.py
+from sqlalchemy.orm import Session, joinedload
+from db.models.clients import Clients
+from db.models.projects import Projects
+from utils.service import BaseService
+
+class ProjectService(BaseService):
+
+    def get_project(self, project_id: int):
+        return self.db.query(Projects).filter(Projects.id == project_id).first()
+    
+    def get_project_with_client(self, project_id: int):
+        return self.db.query(Projects).filter(Projects.id == project_id).options(
+            joinedload(Projects.client)
+        ).first()
+    
+    def create_project(self, project_data):
+        project = Projects(**project_data)
+        self.db.add(project)
+        self.commit_and_refresh(project)
+        return project
+    
+    def update_project(self, project_id: int, project_data):
+        project = self.get_project(project_id)
+        for key, value in project_data.items():
+            setattr(project, key, value)
+        self.commit_and_refresh(project)
+        return project
+    
+    
+
+# File: ./backend/app/services/scenario.py
+
+
+# File: ./backend/app/services/user_type.py
+from db.models.user_types import UserTypes
+from sqlalchemy.orm import Session
+from utils.service import BaseService
+
+class UserTypeService(BaseService):
+    
+    def get_user_type_by_id(self, user_type_id: int):
+        return self.db.query(UserTypes).filter(UserTypes.id == user_type_id).first()
+    
+    def get_user_type_by_name(self, name: str):
+        return self.db.query(UserTypes).filter(UserTypes.name == name).first()
+    
+    def create_user_type(self, user_type_data):
+        user_type = UserTypes(**user_type_data)
+        self.db.add(user_type)
+        self.commit_and_refresh(user_type)
+        return user_type
+    
+    def update_user_type(self, user_type_id, user_type_data):
+        user_type = self.get_user_type_by_id(user_type_id)
+        if not user_type:
+            return None
+        for key, value in user_type_data.items():
+            setattr(user_type, key, value)
+        self.commit_and_refresh(user_type)
+        return user_type
+
+# File: ./backend/app/services/test_suite.py
+from db.models.test_suites import TestSuites
+from db.models.test_cases import TestCases
+from db.models.suitcases import Suitcases
+from db.models.test_case_versions import TestCaseVersions
+
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import select, text
+from utils.service import BaseService
+
+class TestSuiteService(BaseService):
+    def get_test_suite(self, test_suite_id: int):
+        return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).first()
+    
+    def get_test_suite_with_test_cases(self, test_suite_id: int):
+        return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).options(
+            joinedload(TestSuites.suitcases).joinedload(Suitcases.test_case)
+        ).first()
+    
+    def get_test_suite_with_test_cases_with_latest_test_case_version(self, test_suite_id: int):
+
+        return (
+            self.db.execute(
+                text("""
+                    SELECT DISTINCT ON (tc.id)
+                        ts.id AS suite_id,
+                        ts.name AS suite_name,
+                        tc.id AS test_case_id,
+                        tc.name AS test_case_name,
+                        tcv.id AS version_id,
+                        tcv.created_at
+                    FROM test_suites ts
+                    JOIN suitcases sc ON sc.test_suite_id = ts.id
+                    JOIN test_cases tc ON tc.id = sc.test_case_id
+                    JOIN test_case_versions tcv ON tcv.test_case_id = tc.id
+                    WHERE ts.id = :test_suite_id
+                    AND tcv.release_ready = true
+                    ORDER BY tc.id, tcv.created_at DESC
+                """),
+                {"test_suite_id": test_suite_id}
+            ).fetchall()
+        )
+
+    def create_test_suite(self, test_suite_data):
+        test_suite = TestSuites(**test_suite_data)
+        self.db.add(test_suite)
+        self.commit_and_refresh(test_suite)
+        return test_suite
+    
+    def update_test_suite(self, test_suite_id, test_suite_data):
+        test_suite = self.get_test_suite(test_suite_id)
+        if not test_suite:
+            return None
+        for key, value in test_suite_data.items():
+            setattr(test_suite, key, value)
+        self.commit_and_refresh(test_suite)
+        return test_suite
+    
+
+
+# File: ./backend/app/services/run.py
+from sqlalchemy.orm import Session, joinedload
+from db.models.clients import Clients
+from db.models.projects import Projects
+from db.models.runs import Runs
+from utils.service import BaseService
+
+class RunService(BaseService):
+    
+    def get_run(self, run_id):
+        return self.db.query(Runs).filter(Runs.id == run_id).first()
+    
+    def get_run_with_project(self, run_id):
+        return self.db.query(Runs).filter(Runs.id == run_id).options(
+            joinedload(Runs.project)
+        ).first()
+    
+    def get_run_with_project_and_client(self, run_id):
+        return self.db.query(Runs).filter(Runs.id == run_id).options(
+            joinedload(Runs.project).joinedload(Projects.client)
+        ).first()
+    
+    def create_run(self, run_data):
+        run = Runs(**run_data)
+        self.db.add(run)
+        self.commit_and_refresh(run)
+        return run
+    
+    def update_run(self, run_id, run_data):
+        run = self.get_run(run_id)
+        if not run:
+            return None
+        for key, value in run_data.items():
+            setattr(run, key, value)
+        self.commit_and_refresh(run)
+        return run
+
+# File: ./backend/app/services/suitcase.py
+from sqlalchemy import text
+from sqlalchemy.orm import joinedload
+
+from db.models.test_cases import TestCases
+from db.models.suitcases import Suitcases
+from db.models.test_case_versions import TestCaseVersions
+
+from utils.service import BaseService
+
+
+class SuitcaseService(BaseService):
+
+    def create_suitcase(self, suitcase_data: dict) -> Suitcases:
+        suitcase = Suitcases(**suitcase_data)
+        self.db.add(suitcase)
+        self.commit_and_refresh(suitcase)
+        return suitcase
+
+    def get_suitcase(self, suitcase_id: int):
+        return self.db.query(Suitcases).filter(Suitcases.id == suitcase_id).first()
+    
+    def get_suitcases_by_test_case_id(self, test_case_id: int):
+        return self.db.query(Suitcases).filter(Suitcases.test_case_id == test_case_id).all()
+    
+    def get_suitcases_by_test_suite_id(self, test_suite_id: int):
+        return self.db.query(Suitcases).filter(Suitcases.test_suite_id == test_suite_id).all()
+    
+    def get_suitcases_by_test_case_and_test_suite_id(self, test_case_id: int, test_suite_id: int):
+        return self.db.query(Suitcases).filter(
+            Suitcases.test_case_id == test_case_id,
+            Suitcases.test_suite_id == test_suite_id
+        ).all()
+    
+    def update_suitcase(self, suitcase_id: int, suitcase_data):
+        suitcase = self.get_suitcase(suitcase_id)
+        if not suitcase:
+            return None
+        for key, value in suitcase_data.items():
+            setattr(suitcase, key, value)
+        self.commit_and_refresh(suitcase)
+        return suitcase
+
+# File: ./backend/app/services/status.py
+
+
+# File: ./backend/app/services/attachment.py
+
+
+# File: ./backend/app/services/status_set.py
+
+
+# File: ./backend/app/services/user_group.py
+
+
+# File: ./backend/app/services/session.py
+
+from datetime import datetime
+from sqlalchemy.orm import Session
+from db.models.sessions import Sessions
+from app.api.utils.sessions import generate_session_secret, hash_session_secret
+from utils.service import BaseService
+
+class SessionService(BaseService):
+
+    def create_session(self, user_id: int, expires_at: datetime, created_at: datetime) -> str:
+        
+        session_secret = generate_session_secret()
+        session_hash = hash_session_secret(session_secret)
+
+        session = Sessions(
+            user_id=user_id,
+            token=session_hash,
+            created_at=created_at,
+            expires_at=expires_at
+        )
+        self.commit_and_refresh(session)
+        return session_secret
+    
+    def get_session(self, session_secret: str):
+        session_hash = hash_session_secret(session_secret)
+        session = self.db.query(Sessions).filter(Sessions.token == session_hash).first()
+        if not session:
+            return None
+        return session
+    
+    def delete_session(self, session_secret: str):
+        session = self.get_session(session_secret)
+        
+        if not session:
+            return None
+        
+        self.db.delete(session)
+        self.db.commit()
+        return session
+    
+    def delete_all_sessions(self, user_id: int):
+        sessions = self.db.query(Sessions).filter(Sessions.user_id == user_id).all()
+        
+        for session in sessions:
+            self.db.delete(session)
+        self.commit_and_refresh(session)
+        return sessions
+
+# File: ./backend/app/services/device.py
 
 
 # File: ./backend/app/services/utils/service.py
@@ -1565,6 +1290,19 @@ api_router.include_router(user_group.router)
 api_router.include_router(user_type.router)
 api_router.include_router(users.router)
 
+# File: ./backend/app/api/utils/auth.py
+from passlib.context import CryptContext
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+
+
 # File: ./backend/app/api/utils/users.py
 from datetime import datetime, timezone
 
@@ -1598,19 +1336,6 @@ def get_current_user(
     return user
 
 
-# File: ./backend/app/api/utils/auth.py
-from passlib.context import CryptContext
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-
-
 # File: ./backend/app/api/utils/sessions.py
 import hashlib
 import secrets
@@ -1623,204 +1348,6 @@ def generate_session_secret() -> str:
 def hash_session_secret(secret: str) -> str:
     # Store session token hashes as hex strings so they can be stored in String columns.
     return hashlib.sha256(secret.encode()).hexdigest()
-
-# File: ./backend/app/api/v1/status_set.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/status-sets",
-    tags=["status-sets"],
-)
-
-# File: ./backend/app/api/v1/device.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/devices",
-    tags=["devices"],
-)
-
-# File: ./backend/app/api/v1/suitcase.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/suitcases",
-    tags=["suitcases"],
-)
-
-# File: ./backend/app/api/v1/test_suite.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/test-suites",
-    tags=["test-suites"],
-)
-
-# File: ./backend/app/api/v1/user_type.py
-from fastapi import APIRouter
-
-
-router = APIRouter(
-    prefix="/user-types",
-    tags=["user-types"],
-)
-
-# File: ./backend/app/api/v1/users.py
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-
-
-router = APIRouter(
-    prefix="/users",
-    tags=["users"],
-)
-
-# File: ./backend/app/api/v1/project.py
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
-from db.session import get_db
-
-from app.schemas.client import ClientBase, ClientCreate, ClientOut, ClientUpdate, ClientWithProjects
-from app.schemas.project import ProjectBase, ProjectCreate, ProjectOut, ProjectUpdate, ProjectWithClient
-from db.models.clients import Clients
-from db.models.projects import Projects
-from db.models.users import Users
-from app.api.utils.users import get_current_user
-
-from app.services.project import ProjectService
-
-router = APIRouter(
-    prefix="/projects",
-    tags=["projects"],
-)
-
-@router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
-def create_project(
-    project_in: ProjectCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    service = ProjectService(db)
-    project = service.create_project(project_in.dict())
-    return project
-
-@router.get("/{project_id}", response_model=ProjectOut)
-def get_project(
-    project_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    project = ProjectService(db).get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project
-
-@router.get("/{project_id}/with-client", response_model=ProjectWithClient)
-def get_project_with_client(
-    project_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    project_with_client = ProjectService(db).get_project_with_client(project_id)
-    if not project_with_client:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project_with_client
-
-@router.patch("/{project_id}", response_model=ProjectOut)
-def update_project(
-    project_id: int,
-    project_in: ProjectUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    project = ProjectService(db).update_project(project_id, project_in.dict(exclude_unset=True))
-    return project
-
-# File: ./backend/app/api/v1/status.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/status",
-    tags=["status"],
-)
-
-# File: ./backend/app/api/v1/scenario.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/scenarios",
-    tags=["scenarios"],
-)
-
-# File: ./backend/app/api/v1/test_case.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/test-cases",
-    tags=["test-cases"],
-)
-
-# File: ./backend/app/api/v1/attachment.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/attachments",
-    tags=["attachments"],
-)
-
-# File: ./backend/app/api/v1/test_case_version.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/test-case-versions",
-    tags=["test-case-versions"],
-)
-
-# File: ./backend/app/api/v1/user_group.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/user-groups",
-    tags=["user-groups"],
-)
-
-# File: ./backend/app/api/v1/run.py
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
-from db.session import get_db
-from db.models.users import Users
-from app.api.utils.users import get_current_user
-
-
-router = APIRouter(
-    prefix="/runs",
-    tags=["runs"],
-)
-
-@router.get("/{run_id}", status_code=status.HTTP_200_OK)
-def get_runs(
-    run_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    run = RunService(db).get_run(run_id)
-    
-
-
-
-
-# File: ./backend/app/api/v1/execution.py
-from fastapi import APIRouter
-
-router = APIRouter(
-    prefix="/executions",
-    tags=["executions"],
-)
-
-# File: ./backend/app/api/v1/session.py
-
 
 # File: ./backend/app/api/v1/auth.py
 from sqlalchemy.orm import Session
@@ -1921,6 +1448,49 @@ async def get_current_user_info(
     return current_user
     
 
+# File: ./backend/app/api/v1/execution.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/executions",
+    tags=["executions"],
+)
+
+# File: ./backend/app/api/v1/test_case_version.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/test-case-versions",
+    tags=["test-case-versions"],
+)
+
+# File: ./backend/app/api/v1/users.py
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+
+router = APIRouter(
+    prefix="/users",
+    tags=["users"],
+)
+
+# File: ./backend/app/api/v1/resolution.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/resolutions",
+    tags=["resolutions"],
+)
+
+# File: ./backend/app/api/v1/test_case.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/test-cases",
+    tags=["test-cases"],
+)
+
 # File: ./backend/app/api/v1/client.py
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -1980,15 +1550,580 @@ def update_client(
     current_user: Users = Depends(get_current_user),
 ):
     client = ClientService(db).update_client(client_id, client_in.dict(exclude_unset=True))
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
     return client
     
 
 
-# File: ./backend/app/api/v1/resolution.py
+# File: ./backend/app/api/v1/project.py
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+from db.session import get_db
+
+from app.schemas.client import ClientBase, ClientCreate, ClientOut, ClientUpdate, ClientWithProjects
+from app.schemas.project import ProjectBase, ProjectCreate, ProjectOut, ProjectUpdate, ProjectWithClient
+from db.models.clients import Clients
+from db.models.projects import Projects
+from db.models.users import Users
+from app.api.utils.users import get_current_user
+
+from app.services.project import ProjectService
+
+router = APIRouter(
+    prefix="/projects",
+    tags=["projects"],
+)
+
+@router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+def create_project(
+    project_in: ProjectCreate,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    service = ProjectService(db)
+    project = service.create_project(project_in.dict())
+    return project
+
+@router.get("/{project_id}", response_model=ProjectOut)
+def get_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    project = ProjectService(db).get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+@router.get("/{project_id}/with-client", response_model=ProjectWithClient)
+def get_project_with_client(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    project_with_client = ProjectService(db).get_project_with_client(project_id)
+    if not project_with_client:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project_with_client
+
+@router.patch("/{project_id}", response_model=ProjectOut)
+def update_project(
+    project_id: int,
+    project_in: ProjectUpdate,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    project = ProjectService(db).update_project(project_id, project_in.dict(exclude_unset=True))
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+# File: ./backend/app/api/v1/scenario.py
 from fastapi import APIRouter
 
 router = APIRouter(
-    prefix="/resolutions",
-    tags=["resolutions"],
+    prefix="/scenarios",
+    tags=["scenarios"],
 )
+
+# File: ./backend/app/api/v1/user_type.py
+from fastapi import APIRouter
+
+
+router = APIRouter(
+    prefix="/user-types",
+    tags=["user-types"],
+)
+
+# File: ./backend/app/api/v1/test_suite.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/test-suites",
+    tags=["test-suites"],
+)
+
+# File: ./backend/app/api/v1/run.py
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+from db.session import get_db
+from db.models.users import Users
+from app.api.utils.users import get_current_user
+from app.services.run import RunService
+
+router = APIRouter(
+    prefix="/runs",
+    tags=["runs"],
+)
+
+@router.get("/{run_id}", status_code=status.HTTP_200_OK)
+def get_runs(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    run = RunService(db).get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+    
+
+
+
+
+# File: ./backend/app/api/v1/suitcase.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/suitcases",
+    tags=["suitcases"],
+)
+
+# File: ./backend/app/api/v1/status.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/status",
+    tags=["status"],
+)
+
+# File: ./backend/app/api/v1/attachment.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/attachments",
+    tags=["attachments"],
+)
+
+# File: ./backend/app/api/v1/status_set.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/status-sets",
+    tags=["status-sets"],
+)
+
+# File: ./backend/app/api/v1/user_group.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/user-groups",
+    tags=["user-groups"],
+)
+
+# File: ./backend/app/api/v1/session.py
+
+
+# File: ./backend/app/api/v1/device.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/devices",
+    tags=["devices"],
+)
+
+# File: ./backend/app/schemas/auth.py
+from pydantic import BaseModel, EmailStr, Field
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserRegister(BaseModel):
+    first_name: str
+    last_name: str
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=72)
+
+class UserLogout(BaseModel):
+    pass
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class TokenPayload(BaseModel):
+    sub: int   # user id
+    exp: int
+
+
+# File: ./backend/app/schemas/execution.py
+
+
+# File: ./backend/app/schemas/test_case_version.py
+
+
+# File: ./backend/app/schemas/users.py
+from datetime import datetime
+from pydantic import BaseModel, EmailStr, Field
+
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    first_name: str
+    last_name: str
+    password: str = Field(..., min_length=8)
+
+class UserUpdateSelf(BaseModel):
+    first_name: str | None = None
+    last_name: str | None = None
+    email: EmailStr | None = None
+    password: str | None = Field(None, min_length=8)
+
+class UserUpdateAdmin(BaseModel):
+    user_group_id: int | None = None
+    user_type_id: int | None = None
+    active: bool | None = None
+
+class UserOut(BaseModel):
+    id: int
+    email: EmailStr
+    first_name: str
+    last_name: str
+    active: bool
+    user_type_id: int
+    user_group_id: int | None
+    created_at: datetime
+    last_login_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/resolution.py
+from pydantic import BaseModel, Field
+
+class ResolutionBase(BaseModel):
+    w: int
+    h: int
+
+class ResolutionCreate(ResolutionBase):
+    pass
+
+class ResolutionUpdate(BaseModel):
+    w: int | None = None
+    h: int | None = None
+
+class ResolutionOut(ResolutionBase):
+    id: int
+    w: int
+    h: int
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/test_case.py
+
+
+# File: ./backend/app/schemas/client.py
+from pydantic import BaseModel, Field
+from app.schemas.project import ProjectOut
+
+class ClientBase(BaseModel):
+    name: str = Field(..., max_length=255)
+
+
+class ClientCreate(ClientBase):
+    pass
+
+
+class ClientUpdate(BaseModel):
+    name: str | None = Field(None, max_length=255)
+
+
+class ClientOut(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+
+class ClientWithProjects(ClientOut):
+    projects: list[ProjectOut]
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/project.py
+from pydantic import BaseModel, Field
+
+class ProjectBase(BaseModel):
+    name: str = Field(..., max_length=255)
+    client_id: int
+
+class ProjectCreate(ProjectBase):
+    pass
+
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(None, max_length=255)
+    client_id: int | None = None
+
+class ProjectOut(ProjectBase):
+    id: int
+    name: str
+    client_id: int
+
+    class Config:
+        from_attributes = True
+
+class ProjectWithClient(ProjectOut):
+    client_id: int
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/scenario.py
+
+
+# File: ./backend/app/schemas/user_type.py
+from pydantic import BaseModel, Field
+
+class UserTypeBase(BaseModel):
+    name: str = Field(..., max_length=100)
+    description: str | None = None
+
+
+class UserTypeCreate(UserTypeBase):
+    pass
+
+
+class UserTypeUpdate(BaseModel):
+    name: str | None = Field(None, max_length=100)
+    description: str | None = None
+
+
+class UserTypeOut(UserTypeBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/test_suite.py
+
+
+# File: ./backend/app/schemas/run.py
+from pydantic import BaseModel, Field
+
+class RunBase(BaseModel):
+    name: str = Field(..., max_length=255)
+
+# File: ./backend/app/schemas/suitcase.py
+
+
+# File: ./backend/app/schemas/status.py
+
+
+# File: ./backend/app/schemas/attachment.py
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+from datetime import datetime
+
+class AttachmentBase(BaseModel):
+    resolution_id: Optional[int] = None
+    settings: Optional[Dict[str, Any]] = None
+
+class AttachmentCreateInternal(BaseModel):
+    uploaded_by: int
+    filename: str
+    relative_path: str
+    resolution_id: Optional[int]
+    settings: Optional[dict]
+    presentmon_version: Optional[str]
+
+class AttachmentOut(BaseModel):
+    id: int
+    uploaded_at: datetime
+    uploaded_by: int
+    filename: str
+    
+    class Config:
+        from_attributes = True
+
+
+
+# File: ./backend/app/schemas/status_set.py
+
+
+# File: ./backend/app/schemas/user_group.py
+from pydantic import BaseModel, Field
+
+class UserGroupBase(BaseModel):
+    name: str = Field(..., max_length=100)
+
+
+class UserGroupCreate(UserGroupBase):
+    owner_id: int
+
+
+class UserGroupUpdate(BaseModel):
+    name: str | None = Field(None, max_length=100)
+    owner_id: int | None = None
+
+
+class UserGroupOut(UserGroupBase):
+    id: int
+    owner_id: int
+    created_by_id: int
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/app/schemas/session.py
+
+
+# File: ./backend/app/schemas/device.py
+from pydantic import BaseModel, Field
+
+class DeviceBase(BaseModel):
+    name_external: str = Field(..., max_length=255)
+    name_internal: str | None = Field(None, max_length=255)
+    cpu: str | None = Field(None, max_length=255)
+    gpu: str | None = Field(None, max_length=255)
+    ram: int | None = None
+    project_id: int
+
+class DeviceCreate(DeviceBase):
+    pass
+
+class DeviceUpdate(BaseModel):
+    name_external: str | None = Field(None, max_length=255)
+    name_internal: str | None = Field(None, max_length=255)
+    cpu: str | None = Field(None, max_length=255)
+    gpu: str | None = Field(None, max_length=255)
+    ram: int | None = None
+    project_id: int | None = None
+
+class DeviceOut(DeviceBase):
+    id: int
+    name_external: str
+    name_internal: str | None
+    cpu: str | None
+    gpu: str | None
+    ram: int | None
+
+    class Config:
+        from_attributes = True
+
+# File: ./backend/tests/conftest.py
+import os
+import sys
+
+import pytest
+
+# Ensure the backend package directory is on sys.path when pytest runs from the repo root.
+HERE = os.path.dirname(__file__)
+BACKEND_ROOT = os.path.abspath(os.path.join(HERE, ".."))
+if BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, BACKEND_ROOT)
+
+from fastapi.testclient import TestClient
+
+from app import create_app
+from db.base import Base
+from db.engine import engine
+from db.session import SessionLocal, get_db
+
+
+@pytest.fixture(scope="session")
+def app():
+    """Create a FastAPI app and ensure the database schema is present."""
+    # Ensure schema exists before tests run.
+    Base.metadata.create_all(bind=engine)
+
+    app = create_app()
+    yield app
+
+    # Tear down schema after tests.
+    Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture(scope="function")
+def db_session():
+    """Provide a database session that is rolled back after each test."""
+    connection = engine.connect()
+    transaction = connection.begin()
+
+    session = SessionLocal(bind=connection)
+
+    yield session
+
+    session.close()
+    transaction.rollback()
+    connection.close()
+
+
+@pytest.fixture(scope="function")
+def client(app, db_session):
+    """FastAPI test client that uses a transactional DB session."""
+
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = override_get_db
+    return TestClient(app)
+
+
+# File: ./backend/tests/test_auth.py
+from datetime import datetime
+
+import pytest
+
+
+def test_register_and_login_and_me_and_logout(client):
+    # Register a new user.
+    email = f"test-{datetime.utcnow().timestamp()}@example.com"
+    password = "test-password"
+
+    register_resp = client.post(
+        "/api/v1/auth/register",
+        json={
+            "first_name": "Test",
+            "last_name": "User",
+            "email": email,
+            "password": password,
+        },
+    )
+    assert register_resp.status_code == 200
+    assert register_resp.json()["email"] == email
+
+    # Login with the new user and make sure we get a session cookie.
+    login_resp = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": email,
+            "password": password,
+        },
+    )
+    assert login_resp.status_code == 200
+    assert "session" in login_resp.cookies
+
+    # Use the session cookie to hit /me.
+    client.cookies.update(login_resp.cookies)
+    me_resp = client.get("/api/v1/auth/me")
+    assert me_resp.status_code == 200
+    assert me_resp.json()["email"] == email
+
+    # Logout (should clear the cookie server-side and in the TestClient). 
+    logout_resp = client.post("/api/v1/auth/logout")
+    assert logout_resp.status_code == 200
+    assert "session" not in logout_resp.cookies
+
+
+def test_login_invalid_credentials(client):
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "doesnotexist@example.com", "password": "x"},
+    )
+    assert resp.status_code == 401
+
+
+def test_me_requires_auth(client):
+    resp = client.get("/api/v1/auth/me")
+    assert resp.status_code == 401
+
 

@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from db.models.sessions import Sessions
 from app.api.utils.sessions import generate_session_secret, hash_session_secret
-from utils.service import BaseService
+from .utils.service import BaseService
 
 class SessionService(BaseService):
 
