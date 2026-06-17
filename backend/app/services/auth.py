@@ -34,15 +34,19 @@ class AuthService(BaseService):
         session = SessionService(self.db).get_session(session_secret=session_secret)
         if not session:
             return False
-        
-        if session.expires_at < datetime.now(timezone.utc):
+
+        expires_at = session.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        if expires_at < datetime.now(timezone.utc):
             SessionService(self.db).delete_session(session_secret)
             return False
-        
+
         user = UserService(self.db).get_user_by_id(session.user_id)
         if not user or not user.active:
             return False
-        
+
         return True
     
     def register_user(self, first_name: str, last_name: str, email: str, password: str):

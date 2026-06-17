@@ -18,6 +18,7 @@ class SessionService(BaseService):
             created_at=created_at,
             expires_at=expires_at
         )
+        self.db.add(session)
         self.commit_and_refresh(session)
         return session_secret
     

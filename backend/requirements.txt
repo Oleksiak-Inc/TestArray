@@ -11,4 +11,5 @@ alembic
 passlib[bcrypt]
 bcrypt<5
 python-jose==3.3.0
+pytest
 
