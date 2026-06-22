@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.status import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.status import StatusService
 
@@ -67,7 +67,7 @@ def update_status(
 def delete_status(
     status_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     status_obj = StatusService(db).delete_status(status_id)
     if not status_obj:

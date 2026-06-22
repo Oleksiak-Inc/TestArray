@@ -7,7 +7,7 @@ from app.schemas.client import *
 from db.models.clients import Clients
 from db.models.projects import Projects
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 
 from app.services.client import ClientService
 
@@ -59,4 +59,13 @@ def update_client(
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client
-    
+
+@router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_client(
+    client_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_admin_user),
+):
+    client = ClientService(db).delete_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")

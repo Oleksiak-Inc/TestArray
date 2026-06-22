@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.test_suite import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.test_suite import TestSuiteService
 
@@ -81,7 +81,7 @@ def update_test_suite(
 def delete_test_suite(
     test_suite_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     test_suite = TestSuiteService(db).delete_test_suite(test_suite_id)
     if not test_suite:

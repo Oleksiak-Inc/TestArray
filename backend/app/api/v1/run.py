@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from db.session import get_db
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from app.services.run import RunService
 from app.schemas.run import *
 
@@ -63,7 +63,7 @@ def update_run(
 def delete_run(
     run_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     run = RunService(db).delete_run(run_id)
     if not run:

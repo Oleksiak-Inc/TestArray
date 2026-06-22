@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.suitcase import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.suitcase import SuitcaseService
 from db.models.test_cases import TestCases
@@ -106,7 +106,7 @@ def update_suitcase(
 def delete_suitcase(
     suitcase_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     suitcase = SuitcaseService(db).delete_suitcase(suitcase_id)
     if not suitcase:

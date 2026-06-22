@@ -8,7 +8,7 @@ from app.schemas.project import *
 from db.models.clients import Clients
 from db.models.projects import Projects
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 
 from app.services.project import ProjectService
 
@@ -60,3 +60,13 @@ def update_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_admin_user),
+):
+    project = ProjectService(db).delete_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")

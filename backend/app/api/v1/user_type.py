@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.user_type import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.user_type import UserTypeService
 
@@ -18,7 +18,7 @@ router = APIRouter(
 def create_user_type(
     user_type_in: UserTypeCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     service = UserTypeService(db)
     return service.create_user_type(user_type_in.model_dump())
@@ -65,7 +65,7 @@ def update_user_type(
 def delete_user_type(
     user_type_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     # we add a delete method to the service or delete directly
     from db.models.user_types import UserTypes
