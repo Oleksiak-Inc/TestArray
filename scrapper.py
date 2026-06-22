@@ -5,12 +5,13 @@ if __name__ == "__main__":
     for dirpath, dirnames, filenames in os.walk("./backend"):
         # Skip unwanted directories
         parts = dirpath.split(os.sep)
-        if "alembic" in parts or ".venv" in parts:
+        if "alembic" in parts or ".venv" in parts or "tests" in parts:
             continue
         
         for filename in filenames:
             if filename.startswith("."):
                 continue
+            
             if filename.endswith(".py"):
                 filepath = os.path.join(dirpath, filename)
                 with open(filepath, "r") as file:

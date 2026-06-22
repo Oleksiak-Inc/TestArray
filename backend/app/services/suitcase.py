@@ -16,6 +16,40 @@ class SuitcaseService(BaseService):
         self.commit_and_refresh(suitcase)
         return suitcase
 
+    def create_suitcases_bulk(
+        self,
+        test_suite_id: int,
+        test_case_ids: list[int],
+    ) -> dict:
+        # Fetch already-linked test case ids for this suite in one query
+        existing_ids = {
+            row.test_case_id
+            for row in self.db.query(Suitcases.test_case_id)
+            .filter(
+                Suitcases.test_suite_id == test_suite_id,
+                Suitcases.test_case_id.in_(test_case_ids),
+            )
+            .all()
+        }
+ 
+        created = []
+        skipped = []
+ 
+        for tc_id in test_case_ids:
+            if tc_id in existing_ids:
+                skipped.append(tc_id)
+                continue
+            suitcase = Suitcases(test_case_id=tc_id, test_suite_id=test_suite_id)
+            self.db.add(suitcase)
+            self.db.flush()   # gives us suitcase.id before commit
+            created.append(suitcase)
+ 
+        self.db.commit()
+        for s in created:
+            self.db.refresh(s)
+ 
+        return {"created": created, "skipped_duplicate_test_case_ids": skipped}
+
     def get_suitcase(self, suitcase_id: int):
         return self.db.query(Suitcases).filter(Suitcases.id == suitcase_id).first()
     
@@ -38,4 +72,12 @@ class SuitcaseService(BaseService):
         for key, value in suitcase_data.items():
             setattr(suitcase, key, value)
         self.commit_and_refresh(suitcase)
+        return suitcase
+
+    def delete_suitcase(self, suitcase_id: int):
+        suitcase = self.get_suitcase(suitcase_id)
+        if not suitcase:
+            return None
+        self.db.delete(suitcase)
+        self.db.commit()
         return suitcase

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class DeviceBase(BaseModel):
     name_external: str = Field(..., max_length=255)
@@ -27,5 +27,4 @@ class DeviceOut(DeviceBase):
     gpu: str | None
     ram: int | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

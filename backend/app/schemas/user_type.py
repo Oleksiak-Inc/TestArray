@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class UserTypeBase(BaseModel):
     name: str = Field(..., max_length=100)
@@ -17,5 +17,4 @@ class UserTypeUpdate(BaseModel):
 class UserTypeOut(UserTypeBase):
     id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

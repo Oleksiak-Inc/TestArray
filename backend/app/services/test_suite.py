@@ -11,6 +11,9 @@ class TestSuiteService(BaseService):
     def get_test_suite(self, test_suite_id: int):
         return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).first()
     
+    def get_test_suite_by_name(self, name: str):
+        return self.db.query(TestSuites).filter(TestSuites.name == name).first()
+    
     def get_test_suite_with_test_cases(self, test_suite_id: int):
         return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).options(
             joinedload(TestSuites.suitcases).joinedload(Suitcases.test_case)
@@ -54,4 +57,14 @@ class TestSuiteService(BaseService):
             setattr(test_suite, key, value)
         self.commit_and_refresh(test_suite)
         return test_suite
-    
+
+    def list_test_suites(self):
+        return self.db.query(TestSuites).all()
+
+    def delete_test_suite(self, test_suite_id):
+        test_suite = self.get_test_suite(test_suite_id)
+        if not test_suite:
+            return None
+        self.db.delete(test_suite)
+        self.db.commit()
+        return test_suite

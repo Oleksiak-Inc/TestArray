@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class ResolutionBase(BaseModel):
     w: int
@@ -16,5 +16,4 @@ class ResolutionOut(ResolutionBase):
     w: int
     h: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

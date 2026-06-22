@@ -18,7 +18,14 @@ from db.base import Base
 import db.models
 
 from dotenv import load_dotenv
-load_dotenv()
+
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+PROJECT_DIR = Path(__file__).resolve().parents[3]
+if ENVIRONMENT == "development":
+    env_path = PROJECT_DIR / ".env"
+else:
+    env_path = PROJECT_DIR / f".env.{ENVIRONMENT}"
+load_dotenv(env_path)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -42,7 +49,7 @@ target_metadata = Base.metadata
 
 config.set_main_option(
     "sqlalchemy.url",
-    settings.database_url
+    str(settings.DATABASE_URL)
 )
 
 def run_migrations_offline() -> None:

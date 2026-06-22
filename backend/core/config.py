@@ -1,55 +1,59 @@
+import os
 from pathlib import Path
 from typing import Optional
-from pydantic import Field, PostgresDsn
-from pydantic_settings import BaseSettings
+
+from dotenv import load_dotenv
+from pydantic import AnyUrl, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+if ENVIRONMENT == "development":
+    ENV_FILE = BASE_DIR.parent / ".env"
+else:
+    ENV_FILE = BASE_DIR.parent / f".env.{ENVIRONMENT}"
+load_dotenv(ENV_FILE)
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=None,
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
     APP_NAME: str = "TestArray"
-    API_V1_STR: str = Field(..., env="API_V1_STR")
 
-    #SECRET_KEY: str = Field(..., env="SECRET_KEY")
-    #JWT_ALGORITHM: str = "HS256"
+    API_V1_STR: str
+
     ACCESS_TOKEN_EXPIRE_SECONDS: int = 60 * 60 * 12
-    
-    SERVER_HOST: str = Field(..., env="SERVER_HOST")
-    SERVER_PORT: int = Field(..., env="SERVER_PORT")
 
-    POSTGRES_SERVER: str = Field(..., env="POSTGRES_SERVER")
-    DATABASE_URL: Optional[PostgresDsn] = None
-    POSTGRES_PORT: str = Field(..., env="POSTGRES_PORT")
-    POSTGRES_DB: str = Field(..., env="POSTGRES_DB")
-    POSTGRES_USER: str = Field(..., env="POSTGRES_USER")
-    POSTGRES_PASSWORD: str = Field(..., env="POSTGRES_PASSWORD")
+    SERVER_HOST: str
+    SERVER_PORT: int
 
-    FRONTEND_ORIGINS: str = Field(..., env="FRONTEND_ORIGINS")
-    #JWT_SECRET_KEY: str = Field(..., env="JWT_SECRET_KEY")
+    POSTGRES_SERVER: str
+    POSTGRES_PORT: str
+    POSTGRES_DB: str
+    POSTGRES_USER: str
+    POSTGRES_PASSWORD: str
 
-    UPLOAD_DIR: str = Field(..., env="UPLOAD_DIR")
-    MAX_FILE_SIZE: int = 100 * 1024 * 1024
-    ALLOWED_FILE_EXTENSIONS: set = {'.txt', '.pdf', '.png', '.jpg', '.jpeg', '.gif', '.csv', '.json', '.xml'}
+    DATABASE_URL: Optional[AnyUrl] = None
 
-    @property
-    def get_upload_path(self) -> Path:
-        upload_path = Path(self.UPLOAD_DIR)
-        upload_path.mkdir(parents=True, exist_ok=True)
-        return upload_path
-    
-    @property
-    def database_url(self) -> str:
-        if self.DATABASE_URL:
-            return str(self.DATABASE_URL)
-        return str(PostgresDsn.build(
-            scheme="postgresql+psycopg",
-            username=self.POSTGRES_USER,
-            password=self.POSTGRES_PASSWORD,
-            host=self.POSTGRES_SERVER,
-            port=int(self.POSTGRES_PORT) if self.POSTGRES_PORT else None,
-            path=self.POSTGRES_DB or None,
-        ))
+    FRONTEND_ORIGINS: str
 
-    class Config:
-        case_sensitive = True
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    UPLOAD_DIR: str
+
+    MAX_FILE_SIZE: int = 100 * (1024 ** 2)
+    ALLOWED_FILE_EXTENSIONS: set = {
+        ".txt",
+        ".pdf",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".csv",
+        ".json",
+        ".xml",
+    }
 
 settings = Settings()

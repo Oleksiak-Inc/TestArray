@@ -88,3 +88,71 @@ class TestCaseService(BaseService):
         self.db.refresh(test_case)
         self.db.refresh(test_case_version)
         return test_case, test_case_version
+
+
+    def create_test_cases_and_versions_bulk(
+        self,
+        items: list[dict],   # each dict: test_case_data + test_case_version_data merged
+        created_by: int,
+        test_suite_id: int = None,
+    ) -> list[dict]:
+
+        VERSION_FIELDS = {"name", "description", "steps", "expected_result", "release_ready"}
+        TEST_CASE_FIELDS = {"scenario_id", "status_set_id"}
+ 
+        results = []
+ 
+        for item in items:
+            # Split the flat dict into its two parts
+            tc_data = {k: v for k, v in item.items() if k in TEST_CASE_FIELDS}
+            tcv_data = {k: v for k, v in item.items() if k in VERSION_FIELDS}
+ 
+            test_case = TestCases(**tc_data)
+            self.db.add(test_case)
+            self.db.flush()  # gives us test_case.id without committing yet
+ 
+            tcv_data.update({
+                "test_case_id": test_case.id,
+                "created_by": created_by,
+                "version": 1,
+            })
+            test_case_version = TestCaseVersions(**tcv_data)
+            self.db.add(test_case_version)
+            self.db.flush()
+ 
+            if test_suite_id:
+                self.db.add(Suitcases(
+                    test_case_id=test_case.id,
+                    test_suite_id=test_suite_id,
+                ))
+ 
+            results.append({
+                "test_case_id": test_case.id,
+                "test_case_version_id": test_case_version.id,
+                "version": test_case_version.version,
+            })
+ 
+        # Single commit for the whole batch — all or nothing
+        self.db.commit()
+        return results
+
+    
+    def list_test_cases(self):
+        return self.db.query(TestCases).all()
+
+    def update_test_case(self, test_case_id: int, test_case_data):
+        test_case = self.get_test_case(test_case_id)
+        if not test_case:
+            return None
+        for key, value in test_case_data.items():
+            setattr(test_case, key, value)
+        self.commit_and_refresh(test_case)
+        return test_case
+
+    def delete_test_case(self, test_case_id: int):
+        test_case = self.get_test_case(test_case_id)
+        if not test_case:
+            return None
+        self.db.delete(test_case)
+        self.db.commit()
+        return test_case

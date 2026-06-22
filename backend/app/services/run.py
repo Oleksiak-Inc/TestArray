@@ -18,6 +18,9 @@ class RunService(BaseService):
         return self.db.query(Runs).filter(Runs.id == run_id).options(
             joinedload(Runs.project).joinedload(Projects.client)
         ).first()
+
+    def list_runs_by_project(self, project_id):
+        return self.db.query(Runs).filter(Runs.project_id == project_id).all()
     
     def create_run(self, run_data):
         run = Runs(**run_data)
@@ -32,4 +35,12 @@ class RunService(BaseService):
         for key, value in run_data.items():
             setattr(run, key, value)
         self.commit_and_refresh(run)
+        return run
+
+    def delete_run(self, run_id):
+        run = self.get_run(run_id)
+        if not run:
+            return None
+        self.db.delete(run)
+        self.db.commit()
         return run

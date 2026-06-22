@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class UserGroupBase(BaseModel):
     name: str = Field(..., max_length=100)
@@ -18,5 +18,4 @@ class UserGroupOut(UserGroupBase):
     owner_id: int
     created_by_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

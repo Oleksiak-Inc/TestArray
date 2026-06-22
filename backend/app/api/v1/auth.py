@@ -1,8 +1,8 @@
 from sqlalchemy.orm import Session
-from app.schemas.auth import UserLogin, TokenPayload, UserLogout, UserRegister
+from app.schemas.auth import *
 from fastapi import APIRouter, Depends, HTTPException, Response, Cookie
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.schemas.users import UserOut
 from app.api.utils.users import get_current_user
 from db.session import get_db
@@ -39,7 +39,7 @@ async def login(
 
     return TokenPayload(
         sub=result["user"].id,
-        exp=int((datetime.utcnow() + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)).timestamp())
+        exp=int((datetime.now(timezone.utc) + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)).timestamp())
     )
 
 @router.post("/logout")

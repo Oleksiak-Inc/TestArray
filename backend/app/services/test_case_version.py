@@ -34,4 +34,23 @@ class TestCaseVersionService(BaseService):
         self.db.add(test_case_version)
         self.commit_and_refresh(test_case_version)
         return test_case_version
-    
+
+    def list_test_case_versions_by_test_case(self, test_case_id: int):
+        return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id).all()
+
+    def update_test_case_version(self, test_case_version_id: int, test_case_version_data):
+        test_case_version = self.get_test_case_version(test_case_version_id)
+        if not test_case_version:
+            return None
+        for key, value in test_case_version_data.items():
+            setattr(test_case_version, key, value)
+        self.commit_and_refresh(test_case_version)
+        return test_case_version
+
+    def delete_test_case_version(self, test_case_version_id: int):
+        test_case_version = self.get_test_case_version(test_case_version_id)
+        if not test_case_version:
+            return None
+        self.db.delete(test_case_version)
+        self.db.commit()
+        return test_case_version

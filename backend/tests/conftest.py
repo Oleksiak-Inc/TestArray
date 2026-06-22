@@ -15,7 +15,8 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-load_dotenv(REPO_ROOT / ".env")
+os.environ["ENVIRONMENT"] = "test"
+load_dotenv(REPO_ROOT / ".env.test")
 
 from app import create_app
 from db.base import Base
@@ -24,9 +25,9 @@ import db.session as db_session_module
 import core.startup as startup_module
 from db.session import get_db
 
-SQLITE_URL = "sqlite:///:memory:"
+TEST_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///:memory:")
 engine = create_engine(
-    SQLITE_URL,
+    TEST_DATABASE_URL,
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
     future=True,

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from db.session import get_db
 
-from app.schemas.client import ClientBase, ClientCreate, ClientOut, ClientUpdate, ClientWithProjects
+from app.schemas.client import *
 from db.models.clients import Clients
 from db.models.projects import Projects
 from db.models.users import Users
@@ -23,7 +23,7 @@ def create_client(
     current_user: Users = Depends(get_current_user),
 ):
     service = ClientService(db)
-    client = service.create_client(client_in.dict())
+    client = service.create_client(client_in.model_dump())
     return client
 
 @router.get("/{client_id}", response_model=ClientOut)
@@ -55,7 +55,7 @@ def update_client(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
-    client = ClientService(db).update_client(client_id, client_in.dict(exclude_unset=True))
+    client = ClientService(db).update_client(client_id, client_in.model_dump(exclude_unset=True))
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client

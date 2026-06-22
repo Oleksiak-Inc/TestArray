@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class ProjectBase(BaseModel):
     name: str = Field(..., max_length=255)
@@ -16,11 +16,9 @@ class ProjectOut(ProjectBase):
     name: str
     client_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ProjectWithClient(ProjectOut):
     client_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

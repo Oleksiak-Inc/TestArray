@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -15,11 +15,9 @@ class AttachmentCreateInternal(BaseModel):
     presentmon_version: Optional[str]
 
 class AttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     uploaded_at: datetime
     uploaded_by: int
     filename: str
-    
-    class Config:
-        from_attributes = True
 
