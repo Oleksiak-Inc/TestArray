@@ -1,6 +1,5 @@
 # File: ./backend/identify_encoding.py
 import os
-
 for root, _, files in os.walk("."):
     for f in files:
         if f.endswith(".py"):
@@ -11,16 +10,12 @@ for root, _, files in os.walk("."):
             except UnicodeDecodeError:
                 print("Bad encoding in:", path)
 
-
 # File: ./backend/run.py
 import uvicorn
 from app import create_app
 from core.config import settings
-
 app = create_app()
-
 print("Starting app on", settings.SERVER_HOST, settings.SERVER_PORT)
-
 if __name__ == "__main__":
     uvicorn.run(
         "run:app",
@@ -31,11 +26,8 @@ if __name__ == "__main__":
 # File: ./backend/core/startup.py
 from db.session import SessionLocal
 from db.models.user_types import UserTypes
-
-
 def init_db() -> None:
     """Initialize required reference data.
-
     Called on application startup.
     """
     db = SessionLocal()
@@ -50,16 +42,13 @@ def init_db() -> None:
     finally:
         db.close()
 
-
 # File: ./backend/core/config.py
 import os
 from pathlib import Path
 from typing import Optional
-
 from dotenv import load_dotenv
 from pydantic import AnyUrl, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 if ENVIRONMENT == "development":
@@ -67,7 +56,6 @@ if ENVIRONMENT == "development":
 else:
     ENV_FILE = BASE_DIR.parent / f".env.{ENVIRONMENT}"
 load_dotenv(ENV_FILE)
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=None,
@@ -75,29 +63,21 @@ class Settings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
-
     APP_NAME: str = "TestArray"
-
     API_V1_STR: str
-
     ACCESS_TOKEN_EXPIRE_SECONDS: int = 60 * 60 * 12
-
     SERVER_HOST: str
     SERVER_PORT: int
-
     POSTGRES_SERVER: str
     POSTGRES_PORT: str
     POSTGRES_DB: str
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
-
     DATABASE_URL: Optional[AnyUrl] = None
-
     FRONTEND_ORIGINS: str
-
     UPLOAD_DIR: str
-
-    MAX_FILE_SIZE: int = 100 * (1024 ** 2)
+    CHUNK_SIZE: int
+    MAX_FILE_SIZE: int
     ALLOWED_FILE_EXTENSIONS: set = {
         ".txt",
         ".pdf",
@@ -109,14 +89,12 @@ class Settings(BaseSettings):
         ".json",
         ".xml",
     }
-
 settings = Settings()
 
 # File: ./backend/db/engine.py
 from sqlalchemy import create_engine
 from core.config import settings
 from sqlalchemy.engine import make_url
-
 database_url = str(settings.DATABASE_URL)
 url = make_url(database_url)
 engine_kwargs = {"future": True}
@@ -130,12 +108,10 @@ else:
         pool_recycle=1800,
         pool_pre_ping=True,
     )
-
 engine = create_engine(database_url, **engine_kwargs)
 
 # File: ./backend/db/base.py
 from sqlalchemy.orm import DeclarativeBase
-
 class Base(DeclarativeBase):
     pass
 
@@ -146,13 +122,11 @@ class Base(DeclarativeBase):
 from sqlalchemy.orm import sessionmaker, Session
 from db.engine import engine
 from typing import Generator
-
 SessionLocal = sessionmaker(
     autocommit=False, 
     autoflush=False, 
     bind=engine
 )
-
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
@@ -164,10 +138,8 @@ def get_db() -> Generator[Session, None, None]:
 from sqlalchemy import Column, Index, Integer, String, Boolean, DateTime, ForeignKey, func
 from sqlalchemy.orm import relationship
 from db.base import Base
-
 class Users(Base):
     __tablename__ = "users"
-
     id = Column(Integer, primary_key=True)
     # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
     user_group_id = Column(Integer, ForeignKey("user_groups.id", use_alter=True), nullable=True)
@@ -176,55 +148,45 @@ class Users(Base):
     last_name = Column(String, nullable=False)
     email = Column(String, nullable=False, unique=True)
     password = Column(String, nullable=False)
-
     active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True))
-
     # ---- relationships ----
     user_type = relationship(
         "UserTypes", 
         foreign_keys=[user_type_id], 
         back_populates="users")
-
     user_group = relationship(
         "UserGroups",
         foreign_keys=[user_group_id],
         back_populates="members"
     )
-
     groups_created = relationship(
         "UserGroups",
         foreign_keys="UserGroups.created_by_id",
         back_populates="created_by"
     )
-
     groups_owned = relationship(
         "UserGroups",
         foreign_keys="UserGroups.owner_id",
         back_populates="owner"
     )
-
     uploads = relationship(
         "Attachments", 
         foreign_keys="Attachments.uploaded_by", 
         back_populates="uploader")
-    
     executions = relationship(
         "Executions", 
         foreign_keys="Executions.executed_by", 
         back_populates="executor")
-    
     created_test_case_versions = relationship(
         "TestCaseVersions", 
         foreign_keys="TestCaseVersions.created_by", 
         back_populates="creator")
-    
     sessions = relationship(
         "Sessions",
         foreign_keys="Sessions.user_id", 
         back_populates="user")
-    
     __table_args__ = (
         Index("user_user_type_idx", "user_type_id"),
         Index("user_user_group_idx", "user_group_id"),
@@ -234,13 +196,10 @@ class Users(Base):
 from db.base import Base
 from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import relationship
-
 class TestSuites(Base):
     __tablename__ = "test_suites"
-
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True)
-
     suitcases = relationship(
         "Suitcases", 
         back_populates="test_suite",
@@ -251,33 +210,26 @@ class TestSuites(Base):
 from sqlalchemy import Column, Index, Integer, Text, DateTime, ForeignKey, UniqueConstraint
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class Executions(Base):
     __tablename__ = "executions"
-
     id = Column(Integer, primary_key=True)
-
     device_id = Column(Integer, ForeignKey("devices.id",use_alter=True), nullable=False)
     run_id = Column(Integer, ForeignKey("runs.id",use_alter=True), nullable=False)
     test_case_version_id = Column(Integer, ForeignKey("test_case_versions.id",use_alter=True), nullable=False)
-
     executed_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
     status_id = Column(Integer, ForeignKey("statuses.id",use_alter=True), nullable=False)
-
     attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
-
+    resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
     actual_result = Column(Text)
     executed_at = Column(DateTime(timezone=True))
-
     execution_order = Column(Integer, nullable=False)
-
     device = relationship("Devices", back_populates="executions", foreign_keys=[device_id])
     run = relationship("Runs", back_populates="executions", foreign_keys=[run_id])
     test_case_version = relationship("TestCaseVersions", back_populates="executions", foreign_keys=[test_case_version_id])
     executor = relationship("Users", foreign_keys=[executed_by], back_populates="executions")
     status = relationship("Statuses", back_populates="executions", foreign_keys=[status_id])
     attachment = relationship("Attachments", back_populates="executions", foreign_keys=[attachment_id])
-
+    resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
     __table_args__ = (
         UniqueConstraint(
             "run_id",
@@ -296,61 +248,46 @@ class Executions(Base):
 from sqlalchemy import Column, Index, Integer, String
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class Scenarios(Base):
     __tablename__ = "scenarios"
-
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True)
-
     test_cases = relationship("TestCases", back_populates="scenario", foreign_keys="TestCases.scenario_id")
-
-    
 
 # File: ./backend/db/models/status_sets.py
 from sqlalchemy import Column, Index, Integer, String
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class StatusSets(Base):
     __tablename__ = "status_sets"
-
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True)
-
     statuses = relationship(
         "Statuses",
         back_populates="status_set",
         foreign_keys="Statuses.status_set_id"
     )
-    
     test_cases = relationship(
         "TestCases",
         back_populates="status_set",
         foreign_keys="TestCases.status_set_id"
     )
 
-
 # File: ./backend/db/models/sessions.py
 from db.base import Base
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, func
 from sqlalchemy.orm import relationship
-
-
 class Sessions(Base):
     __tablename__ = "sessions"
-
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
     token = Column(String, nullable=False, unique=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False)
-
     user = relationship(
         "Users",
         foreign_keys=[user_id], 
         back_populates="sessions")
-
     __table_args__ = (
         Index("session_user_id_idx", "user_id"),
         Index("session_token_idx", "token"),
@@ -360,10 +297,8 @@ class Sessions(Base):
 from sqlalchemy import Column, Index, Integer, ForeignKey
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class TestCases(Base):
     __tablename__ = "test_cases"
-
     id = Column(Integer, primary_key=True)
     scenario_id = Column(Integer, ForeignKey("scenarios.id"), nullable=False)
     status_set_id = Column(Integer, ForeignKey("status_sets.id"), nullable=False)
@@ -371,7 +306,6 @@ class TestCases(Base):
     status_set = relationship("StatusSets", back_populates="test_cases", foreign_keys=[status_set_id])
     versions = relationship("TestCaseVersions", back_populates="test_case", foreign_keys="TestCaseVersions.test_case_id")
     suitcases = relationship("Suitcases", back_populates="test_case", foreign_keys="Suitcases.test_case_id")
-
     __table_args__ = (
         Index("test_case_scenario_idx", "scenario_id"),
         Index("test_case_status_set_idx", "status_set_id"),
@@ -401,19 +335,14 @@ from .sessions import Sessions
 from sqlalchemy import Column, Index, Integer, String, ForeignKey
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class Projects(Base):
     __tablename__ = "projects"
-
     id = Column(Integer, primary_key=True)
     name = Column(String)
     client_id = Column(Integer, ForeignKey("clients.id",use_alter=True), nullable=False)
-
     client = relationship("Clients", back_populates="projects", foreign_keys=[client_id])
     devices = relationship("Devices", back_populates="project", foreign_keys="Devices.project_id")
-
     runs = relationship("Runs", back_populates="project", foreign_keys="Runs.project_id")
-
     __table_args__ = (
         Index("project_name_idx", "name"),
     )
@@ -423,27 +352,21 @@ from sqlalchemy import Column, Index, Integer, String, Text, Boolean, DateTime, 
 from db.base import Base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-
 class TestCaseVersions(Base):
     __tablename__ = "test_case_versions"
-
     id = Column(Integer, primary_key=True)
     test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-
     release_ready = Column(Boolean, default=False)
     version = Column(Integer, nullable=False)
     name = Column(String)
     description = Column(Text)
     steps = Column(Text)
     expected_result = Column(Text)
-
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
     test_case = relationship("TestCases", back_populates="versions", foreign_keys=[test_case_id])
     creator = relationship("Users", foreign_keys=[created_by], back_populates="created_test_case_versions")
     executions = relationship("Executions", back_populates="test_case_version", foreign_keys="Executions.test_case_version_id")
-
     __table_args__ = (
         UniqueConstraint("test_case_id", "version", name="test_case_version_unique"),
         Index("test_case_version_test_case_idx", "test_case_id"),
@@ -455,10 +378,8 @@ class TestCaseVersions(Base):
 from sqlalchemy import Column, Index, Integer, String, ForeignKey
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class Devices(Base):
     __tablename__ = "devices"
-
     id = Column(Integer, primary_key=True)
     project_id = Column(Integer, ForeignKey("projects.id",use_alter=True), nullable=False)
     name_external = Column(String)
@@ -466,10 +387,8 @@ class Devices(Base):
     cpu = Column(String)
     gpu = Column(String)
     ram = Column(String)
-
     project = relationship("Projects", back_populates="devices", foreign_keys=[project_id])
     executions = relationship("Executions", back_populates="device", foreign_keys="Executions.device_id")
-
     __table_args__ = (
         Index("device_project_idx", "project_id"),
     )
@@ -479,59 +398,45 @@ from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, J
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from db.base import Base
-
 class Attachments(Base):
     __tablename__ = "attachments"
-
     id = Column(Integer, primary_key=True)
-
     parent_attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
     uploaded_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
-    resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
-
+    #resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
     filename = Column(String)
     relative_path = Column(String)
-
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
-    presentmon_version = Column(String)
-
-    settings = Column(JSON)
-
+    #presentmon_version = Column(String)
+    #settings = Column(JSON)
     parent = relationship(
         "Attachments",
         remote_side=[id],
         backref="children"
     )
-
     uploader = relationship("Users", back_populates="uploads", foreign_keys=[uploaded_by])
-    resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
+    #resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
     executions = relationship("Executions", back_populates="attachment", foreign_keys="Executions.attachment_id")
-
-
     __table_args__ = (
         Index("attachment_parent_idx", "parent_attachment_id"),
         Index("attachment_uploaded_by_idx", "uploaded_by"),
         Index("attachment_filename_idx", "filename"),
         Index("attachment_uploaded_at_idx", "uploaded_at"),
-        Index("attachment_resolution_idx", "resolution_id"),
+        #Index("attachment_resolution_idx", "resolution_id"),
     )
 
 # File: ./backend/db/models/statuses.py
 from sqlalchemy import Column, Index, Integer, String, Text, ForeignKey
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class Statuses(Base):
     __tablename__ = "statuses"
-
     id = Column(Integer, primary_key=True)
     status_set_id = Column(Integer, ForeignKey("status_sets.id"), nullable=False)
     name = Column(String, nullable=False)
     description = Column(Text)
-
     status_set = relationship("StatusSets", back_populates="statuses", foreign_keys=[status_set_id])
     executions = relationship("Executions", back_populates="status", foreign_keys="Executions.status_id")
-
     __table_args__ = (
         Index("status_name_idx", "name"),
         Index("status_status_set_idx", "status_set_id"),
@@ -541,23 +446,16 @@ class Statuses(Base):
 from sqlalchemy import Column, Index, Integer, String, DateTime, Text, ForeignKey
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class Runs(Base):
     __tablename__ = "runs"
-
     id = Column(Integer, primary_key=True)
     name = Column(String)
-
     started_at = Column(DateTime(timezone=True))
     done_at = Column(DateTime(timezone=True))
-
     test_suite_metadata = Column(Text)
-
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
-
     project = relationship("Projects", back_populates="runs", foreign_keys=[project_id])
     executions = relationship("Executions", back_populates="run", foreign_keys="Executions.run_id")
-
     __table_args__ = (
         Index("run_name_idx", "name"),
         Index("run_project_idx", "project_id"),
@@ -567,17 +465,13 @@ class Runs(Base):
 from sqlalchemy import Column, ForeignKey, Index, Integer, UniqueConstraint
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class Suitcases(Base):
     __tablename__ = "suitcases"
-
     id = Column(Integer, primary_key=True)
     test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
     test_suite_id = Column(Integer, ForeignKey("test_suites.id"), nullable=False)
-
     test_case = relationship("TestCases", back_populates="suitcases", foreign_keys=[test_case_id])
     test_suite = relationship("TestSuites", back_populates="suitcases", foreign_keys=[test_suite_id])
-
     __table_args__ = (
         UniqueConstraint("test_case_id", "test_suite_id"),
         Index("suitcase_test_case_idx", "test_case_id"),
@@ -588,14 +482,11 @@ class Suitcases(Base):
 from sqlalchemy import Column, Index, Integer, String, Text
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class UserTypes(Base):
     __tablename__ = "user_types"
-
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True, nullable=False)
     description = Column(Text)
-
     # ---- relationships ----
     users = relationship(
         "Users",
@@ -607,20 +498,16 @@ class UserTypes(Base):
 from sqlalchemy import Column, Integer, UniqueConstraint
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class Resolutions(Base):
     __tablename__ = "resolutions"
-
     id = Column(Integer, primary_key=True)
     h = Column(Integer, nullable=False)
     w = Column(Integer, nullable=False)
-
-    attachments = relationship(
-        "Attachments",
+    executions = relationship(
+        "Executions",
         back_populates="resolution",
-        foreign_keys="Attachments.resolution_id"
+        foreign_keys="Executions.resolution_id"
     )
-
     __table_args__ = (
         UniqueConstraint("h", "w", name="resolutions_hw_unique"),
     )
@@ -629,13 +516,10 @@ class Resolutions(Base):
 from sqlalchemy import Column, Index, Integer, String
 from db.base import Base
 from sqlalchemy.orm import relationship
-
 class Clients(Base):
     __tablename__ = "clients"
-
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True, nullable=False) 
-
     projects = relationship(
         "Projects",
         back_populates="client",
@@ -646,36 +530,29 @@ class Clients(Base):
 from sqlalchemy import Column, Index, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
 from db.base import Base
-
 class UserGroups(Base):
     __tablename__ = "user_groups"
     id = Column(Integer, primary_key=True)
-
     # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
     created_by_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
     owner_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
-
     name = Column(String, unique=True)
-
     # ---- relationships ----
     created_by = relationship(
         "Users",
         foreign_keys=[created_by_id],
         back_populates="groups_created"
     )
-
     owner = relationship(
         "Users",
         foreign_keys=[owner_id],
         back_populates="groups_owned"
     )
-
     members = relationship(
         "Users",
         foreign_keys="Users.user_group_id",
         back_populates="user_group"
     )
-
     __table_args__ = (
         Index("user_group_owner_idx", "owner_id"),
         Index("user_group_created_by_idx", "created_by_id"),
@@ -689,16 +566,13 @@ from core.config import settings
 from core.startup import init_db
 from app.api import api_router
 from starlette.middleware.cors import CORSMiddleware
-
 FRONTEND_ORIGINS = getenv("FRONTEND_ORIGINS", "").split(",")
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic
     init_db()
     yield
     # Shutdown logic (if any) would go here
-
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
@@ -708,7 +582,6 @@ def create_app() -> FastAPI:
         openapi_url=f"{settings.API_V1_STR}/openapi.json",
         lifespan=lifespan,                     # ✅ modern approach
     )
-
     app.add_middleware(
         CORSMiddleware,
         allow_origins=FRONTEND_ORIGINS,
@@ -716,9 +589,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-
     app.include_router(api_router, prefix=settings.API_V1_STR)
-
     return app
 
 # File: ./backend/app/services/auth.py
@@ -727,62 +598,45 @@ from db.models.users import Users
 from db.models.sessions import Sessions as UserSessions
 from app.api.utils.auth import hash_password, verify_password
 from datetime import datetime, timedelta, timezone
-
 from core.config import settings
 from app.services.users import UserService
 from app.services.session import SessionService
 from app.services.user_type import UserTypeService
 from .utils.service import BaseService
-
-
 class AuthService(BaseService):
-
     def login_user(self, email: str, password: str):
         user = UserService(self.db).get_user_by_email(email)
         if not user:
             return None
         if not verify_password(password, user.password):
             return None
-
         now = datetime.now(timezone.utc)
         exp = now + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
-
         session_secret = SessionService(self.db).create_session(user.id, exp, now)
-
         user.last_login_at = now
         self.commit_and_refresh(user)
-
         return {"user": user, "access_token": session_secret}
-    
     def validate_session(self, session_secret: str):
         session = SessionService(self.db).get_session(session_secret=session_secret)
         if not session:
             return False
-
         expires_at = session.expires_at
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
-
         if expires_at < datetime.now(timezone.utc):
             SessionService(self.db).delete_session(session_secret)
             return False
-
         user = UserService(self.db).get_user_by_id(session.user_id)
         if not user or not user.active:
             return False
-
         return True
-    
     def register_user(self, first_name: str, last_name: str, email: str, password: str):
         existing_user = self.db.query(Users).filter(Users.email == email).first()
         regular_user_type = UserTypeService(self.db).get_user_type_by_name("regular")
-        
         if existing_user:
             return None
-        
         if not regular_user_type:
             return None
-        
         hashed_password = hash_password(password)
         new_user = Users(
             first_name=first_name, 
@@ -794,16 +648,11 @@ class AuthService(BaseService):
         self.db.add(new_user)
         self.commit_and_refresh(new_user)
         return new_user
-
     def logout_user(self, session_secret: str):
         session = SessionService(self.db).delete_session(session_secret)
-        
         if not session:
             return None
-        
         return True
-
-    
 
 # File: ./backend/app/services/execution.py
 
@@ -813,42 +662,33 @@ from db.models.test_suites import TestSuites
 from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
-
 from sqlalchemy.orm import Session, joinedload
 from .utils.service import BaseService
-
 class TestCaseVersionService(BaseService):
     def get_test_case_version(self, test_case_version_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).first()
-    
     def get_test_case_version_with_test_case(self, test_case_version_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
             joinedload(TestCaseVersions.test_case)
         ).first()
-    
     def get_test_case_version_with_test_case_with_test_suites(self, test_case_version_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
             joinedload(TestCaseVersions.test_case).joinedload(TestCases.suitcases).joinedload(Suitcases.test_suite)
         ).first()
-    
     def get_test_case_version_by_test_case_id(self, test_case_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id).first()
-    
     def get_latest_release_ready_test_case_version_by_test_case_id(self, test_case_id: int):
         return self.db.query(TestCaseVersions).filter(
             TestCaseVersions.test_case_id == test_case_id,
             TestCaseVersions.release_ready == True
         ).order_by(TestCaseVersions.created_at.desc()).first()
-    
     def create_test_case_version(self, test_case_version_data):
         test_case_version = TestCaseVersions(**test_case_version_data)
         self.db.add(test_case_version)
         self.commit_and_refresh(test_case_version)
         return test_case_version
-
     def list_test_case_versions_by_test_case(self, test_case_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id).all()
-
     def update_test_case_version(self, test_case_version_id: int, test_case_version_data):
         test_case_version = self.get_test_case_version(test_case_version_id)
         if not test_case_version:
@@ -857,7 +697,6 @@ class TestCaseVersionService(BaseService):
             setattr(test_case_version, key, value)
         self.commit_and_refresh(test_case_version)
         return test_case_version
-
     def delete_test_case_version(self, test_case_version_id: int):
         test_case_version = self.get_test_case_version(test_case_version_id)
         if not test_case_version:
@@ -870,33 +709,27 @@ class TestCaseVersionService(BaseService):
 from db.models.users import Users
 from sqlalchemy.orm import Session
 from .utils.service import BaseService
-
+from app.api.utils.auth import hash_password
 class UserService(BaseService):
-
     def get_user_by_email(self, email: str):
         user = self.db.query(Users).filter(Users.email == email).first()
         if not user:
             return None
         return user
-
     def get_user_by_id(self, user_id: int):
         return self.db.query(Users).filter(Users.id == user_id).first()
-    
     def list_users(self):
         return self.db.query(Users).all()
-    
     def update_user(self, user_id: int, user_data: dict) -> Users | None:
         user = self.get_user_by_id(user_id)
         if not user:
             return None
-        # If password is being updated, hash it
         if "password" in user_data and user_data["password"] is not None:
             user_data["password"] = hash_password(user_data["password"])
         for key, value in user_data.items():
             setattr(user, key, value)
         self.commit_and_refresh(user)
         return user
-
     def delete_user(self, user_id: int) -> Users | None:
         user = self.get_user_by_id(user_id)
         if not user:
@@ -905,31 +738,23 @@ class UserService(BaseService):
         self.db.commit()
         return user
 
-
-
 # File: ./backend/app/services/resolution.py
 from db.models.resolutions import Resolutions
 from .utils.service import BaseService
-
-
 class ResolutionService(BaseService):
     def get_resolution(self, resolution_id: int):
         return self.db.query(Resolutions).filter(Resolutions.id == resolution_id).first()
-
     def get_resolution_by_hw(self, h: int, w: int):
         return self.db.query(Resolutions).filter(
             Resolutions.h == h, Resolutions.w == w
         ).first()
-
     def list_resolutions(self):
         return self.db.query(Resolutions).all()
-
     def create_resolution(self, resolution_data: dict):
         resolution = Resolutions(**resolution_data)
         self.db.add(resolution)
         self.commit_and_refresh(resolution)
         return resolution
-
     def update_resolution(self, resolution_id: int, resolution_data: dict):
         resolution = self.get_resolution(resolution_id)
         if not resolution:
@@ -938,7 +763,6 @@ class ResolutionService(BaseService):
             setattr(resolution, key, value)
         self.commit_and_refresh(resolution)
         return resolution
-
     def delete_resolution(self, resolution_id: int):
         resolution = self.get_resolution(resolution_id)
         if not resolution:
@@ -950,24 +774,18 @@ class ResolutionService(BaseService):
 # File: ./backend/app/services/test_case.py
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload
-
 from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
 from app.services.suitcase import SuitcaseService
-
 from .utils.service import BaseService
-
-
 class TestCaseService(BaseService):
-
     def get_test_case(self, test_case_id: int):
         return (
             self.db.query(TestCases)
             .filter(TestCases.id == test_case_id)
             .first()
         )
-
     def get_test_case_with_testsuites(self, test_case_id: int):
         return (
             self.db.query(TestCases)
@@ -978,9 +796,7 @@ class TestCaseService(BaseService):
             )
             .first()
         )
-
     def get_test_case_with_latest_version(self, test_case_id: int):
-
         result = self.db.execute(
             text("""
                 SELECT DISTINCT ON (tc.id)
@@ -998,9 +814,7 @@ class TestCaseService(BaseService):
             """),
             {"test_case_id": test_case_id}
         ).fetchone()
-
         return result
-
     def get_test_case_with_all_versions(self, test_case_id: int):
         return (
             self.db.query(TestCases)
@@ -1010,13 +824,11 @@ class TestCaseService(BaseService):
             )
             .first()
         )
-
     def create_test_case(self, test_case_data):
         test_case = TestCases(**test_case_data)
         self.db.add(test_case)
         self.commit_and_refresh(test_case)
         return test_case
-    
     def create_test_case_and_version(self, test_case_data, test_case_version_data, test_suite_id: int = None):
         test_case = TestCases(**test_case_data)
         self.db.add(test_case)
@@ -1025,7 +837,6 @@ class TestCaseService(BaseService):
         test_case_version = TestCaseVersions(**test_case_version_data)
         self.db.add(test_case_version)
         self.db.flush()
-
         if test_suite_id:
             suitcase_data = {
                 "test_case_id": test_case.id,
@@ -1033,34 +844,26 @@ class TestCaseService(BaseService):
             }
             suitcase = Suitcases(**suitcase_data)
             self.db.add(suitcase)
-
         self.db.commit()
         self.db.refresh(test_case)
         self.db.refresh(test_case_version)
         return test_case, test_case_version
-
-
     def create_test_cases_and_versions_bulk(
         self,
         items: list[dict],   # each dict: test_case_data + test_case_version_data merged
         created_by: int,
         test_suite_id: int = None,
     ) -> list[dict]:
-
         VERSION_FIELDS = {"name", "description", "steps", "expected_result", "release_ready"}
         TEST_CASE_FIELDS = {"scenario_id", "status_set_id"}
- 
         results = []
- 
         for item in items:
             # Split the flat dict into its two parts
             tc_data = {k: v for k, v in item.items() if k in TEST_CASE_FIELDS}
             tcv_data = {k: v for k, v in item.items() if k in VERSION_FIELDS}
- 
             test_case = TestCases(**tc_data)
             self.db.add(test_case)
             self.db.flush()  # gives us test_case.id without committing yet
- 
             tcv_data.update({
                 "test_case_id": test_case.id,
                 "created_by": created_by,
@@ -1069,27 +872,21 @@ class TestCaseService(BaseService):
             test_case_version = TestCaseVersions(**tcv_data)
             self.db.add(test_case_version)
             self.db.flush()
- 
             if test_suite_id:
                 self.db.add(Suitcases(
                     test_case_id=test_case.id,
                     test_suite_id=test_suite_id,
                 ))
- 
             results.append({
                 "test_case_id": test_case.id,
                 "test_case_version_id": test_case_version.id,
                 "version": test_case_version.version,
             })
- 
         # Single commit for the whole batch — all or nothing
         self.db.commit()
         return results
-
-    
     def list_test_cases(self):
         return self.db.query(TestCases).all()
-
     def update_test_case(self, test_case_id: int, test_case_data):
         test_case = self.get_test_case(test_case_id)
         if not test_case:
@@ -1098,7 +895,6 @@ class TestCaseService(BaseService):
             setattr(test_case, key, value)
         self.commit_and_refresh(test_case)
         return test_case
-
     def delete_test_case(self, test_case_id: int):
         test_case = self.get_test_case(test_case_id)
         if not test_case:
@@ -1112,22 +908,18 @@ from sqlalchemy.orm import Session, joinedload
 from db.models.clients import Clients
 from db.models.projects import Projects
 from .utils.service import BaseService
-
 class ClientService(BaseService):
     def get_client(self, client_id: int):
         return self.db.query(Clients).filter(Clients.id == client_id).first()
-
     def get_client_with_projects(self, client_id: int):
         return self.db.query(Clients).filter(Clients.id == client_id).options(
             joinedload(Clients.projects)
         ).first()
-
     def create_client(self, client_data):
         client = Clients(**client_data)
         self.db.add(client)
         self.commit_and_refresh(client)
         return client
-
     def update_client(self, client_id: int, client_data):
         client = self.get_client(client_id)
         if not client:
@@ -1142,54 +934,41 @@ from sqlalchemy.orm import Session, joinedload
 from db.models.clients import Clients
 from db.models.projects import Projects
 from .utils.service import BaseService
-
 class ProjectService(BaseService):
-
     def get_project(self, project_id: int):
         return self.db.query(Projects).filter(Projects.id == project_id).first()
-    
     def get_project_with_client(self, project_id: int):
         return self.db.query(Projects).filter(Projects.id == project_id).options(
             joinedload(Projects.client)
         ).first()
-    
     def create_project(self, project_data):
         project = Projects(**project_data)
         self.db.add(project)
         self.commit_and_refresh(project)
         return project
-    
     def update_project(self, project_id: int, project_data):
         project = self.get_project(project_id)
         for key, value in project_data.items():
             setattr(project, key, value)
         self.commit_and_refresh(project)
         return project
-    
-    
 
 # File: ./backend/app/services/scenario.py
 from db.models.scenarios import Scenarios
 from sqlalchemy.orm import Session
 from .utils.service import BaseService
-
-
 class ScenarioService(BaseService):
     def get_scenario(self, scenario_id: int):
         return self.db.query(Scenarios).filter(Scenarios.id == scenario_id).first()
-
     def get_scenario_by_name(self, name: str):
         return self.db.query(Scenarios).filter(Scenarios.name == name).first()
-
     def list_scenarios(self):
         return self.db.query(Scenarios).all()
-
     def create_scenario(self, scenario_data):
         scenario = Scenarios(**scenario_data)
         self.db.add(scenario)
         self.commit_and_refresh(scenario)
         return scenario
-
     def update_scenario(self, scenario_id: int, scenario_data):
         scenario = self.get_scenario(scenario_id)
         if not scenario:
@@ -1198,7 +977,6 @@ class ScenarioService(BaseService):
             setattr(scenario, key, value)
         self.commit_and_refresh(scenario)
         return scenario
-
     def delete_scenario(self, scenario_id: int):
         scenario = self.get_scenario(scenario_id)
         if not scenario:
@@ -1207,26 +985,20 @@ class ScenarioService(BaseService):
         self.db.commit()
         return scenario
 
-
 # File: ./backend/app/services/user_type.py
 from db.models.user_types import UserTypes
 from sqlalchemy.orm import Session
 from .utils.service import BaseService
-
 class UserTypeService(BaseService):
-    
     def get_user_type_by_id(self, user_type_id: int):
         return self.db.query(UserTypes).filter(UserTypes.id == user_type_id).first()
-    
     def get_user_type_by_name(self, name: str):
         return self.db.query(UserTypes).filter(UserTypes.name == name).first()
-    
     def create_user_type(self, user_type_data):
         user_type = UserTypes(**user_type_data)
         self.db.add(user_type)
         self.commit_and_refresh(user_type)
         return user_type
-    
     def update_user_type(self, user_type_id, user_type_data):
         user_type = self.get_user_type_by_id(user_type_id)
         if not user_type:
@@ -1241,25 +1013,19 @@ from db.models.test_suites import TestSuites
 from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
-
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, text
 from .utils.service import BaseService
-
 class TestSuiteService(BaseService):
     def get_test_suite(self, test_suite_id: int):
         return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).first()
-    
     def get_test_suite_by_name(self, name: str):
         return self.db.query(TestSuites).filter(TestSuites.name == name).first()
-    
     def get_test_suite_with_test_cases(self, test_suite_id: int):
         return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).options(
             joinedload(TestSuites.suitcases).joinedload(Suitcases.test_case)
         ).first()
-    
     def get_test_suite_with_test_cases_with_latest_test_case_version(self, test_suite_id: int):
-
         return (
             self.db.execute(
                 text("""
@@ -1281,13 +1047,11 @@ class TestSuiteService(BaseService):
                 {"test_suite_id": test_suite_id}
             ).fetchall()
         )
-
     def create_test_suite(self, test_suite_data):
         test_suite = TestSuites(**test_suite_data)
         self.db.add(test_suite)
         self.commit_and_refresh(test_suite)
         return test_suite
-    
     def update_test_suite(self, test_suite_id, test_suite_data):
         test_suite = self.get_test_suite(test_suite_id)
         if not test_suite:
@@ -1296,10 +1060,8 @@ class TestSuiteService(BaseService):
             setattr(test_suite, key, value)
         self.commit_and_refresh(test_suite)
         return test_suite
-
     def list_test_suites(self):
         return self.db.query(TestSuites).all()
-
     def delete_test_suite(self, test_suite_id):
         test_suite = self.get_test_suite(test_suite_id)
         if not test_suite:
@@ -1308,38 +1070,30 @@ class TestSuiteService(BaseService):
         self.db.commit()
         return test_suite
 
-
 # File: ./backend/app/services/run.py
 from sqlalchemy.orm import Session, joinedload
 from db.models.clients import Clients
 from db.models.projects import Projects
 from db.models.runs import Runs
 from .utils.service import BaseService
-
 class RunService(BaseService):
-    
     def get_run(self, run_id):
         return self.db.query(Runs).filter(Runs.id == run_id).first()
-    
     def get_run_with_project(self, run_id):
         return self.db.query(Runs).filter(Runs.id == run_id).options(
             joinedload(Runs.project)
         ).first()
-    
     def get_run_with_project_and_client(self, run_id):
         return self.db.query(Runs).filter(Runs.id == run_id).options(
             joinedload(Runs.project).joinedload(Projects.client)
         ).first()
-
     def list_runs_by_project(self, project_id):
         return self.db.query(Runs).filter(Runs.project_id == project_id).all()
-    
     def create_run(self, run_data):
         run = Runs(**run_data)
         self.db.add(run)
         self.commit_and_refresh(run)
         return run
-    
     def update_run(self, run_id, run_data):
         run = self.get_run(run_id)
         if not run:
@@ -1348,7 +1102,6 @@ class RunService(BaseService):
             setattr(run, key, value)
         self.commit_and_refresh(run)
         return run
-
     def delete_run(self, run_id):
         run = self.get_run(run_id)
         if not run:
@@ -1360,22 +1113,16 @@ class RunService(BaseService):
 # File: ./backend/app/services/suitcase.py
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload
-
 from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
-
 from .utils.service import BaseService
-
-
 class SuitcaseService(BaseService):
-
     def create_suitcase(self, suitcase_data: dict) -> Suitcases:
         suitcase = Suitcases(**suitcase_data)
         self.db.add(suitcase)
         self.commit_and_refresh(suitcase)
         return suitcase
-
     def create_suitcases_bulk(
         self,
         test_suite_id: int,
@@ -1391,10 +1138,8 @@ class SuitcaseService(BaseService):
             )
             .all()
         }
- 
         created = []
         skipped = []
- 
         for tc_id in test_case_ids:
             if tc_id in existing_ids:
                 skipped.append(tc_id)
@@ -1403,28 +1148,21 @@ class SuitcaseService(BaseService):
             self.db.add(suitcase)
             self.db.flush()   # gives us suitcase.id before commit
             created.append(suitcase)
- 
         self.db.commit()
         for s in created:
             self.db.refresh(s)
- 
         return {"created": created, "skipped_duplicate_test_case_ids": skipped}
-
     def get_suitcase(self, suitcase_id: int):
         return self.db.query(Suitcases).filter(Suitcases.id == suitcase_id).first()
-    
     def get_suitcases_by_test_case_id(self, test_case_id: int):
         return self.db.query(Suitcases).filter(Suitcases.test_case_id == test_case_id).all()
-    
     def get_suitcases_by_test_suite_id(self, test_suite_id: int):
         return self.db.query(Suitcases).filter(Suitcases.test_suite_id == test_suite_id).all()
-    
     def get_suitcases_by_test_case_and_test_suite_id(self, test_case_id: int, test_suite_id: int):
         return self.db.query(Suitcases).filter(
             Suitcases.test_case_id == test_case_id,
             Suitcases.test_suite_id == test_suite_id
         ).all()
-    
     def update_suitcase(self, suitcase_id: int, suitcase_data):
         suitcase = self.get_suitcase(suitcase_id)
         if not suitcase:
@@ -1433,7 +1171,6 @@ class SuitcaseService(BaseService):
             setattr(suitcase, key, value)
         self.commit_and_refresh(suitcase)
         return suitcase
-
     def delete_suitcase(self, suitcase_id: int):
         suitcase = self.get_suitcase(suitcase_id)
         if not suitcase:
@@ -1445,26 +1182,20 @@ class SuitcaseService(BaseService):
 # File: ./backend/app/services/status.py
 from db.models.statuses import Statuses
 from .utils.service import BaseService
-
-
 class StatusService(BaseService):
     def get_status(self, status_id: int):
         return self.db.query(Statuses).filter(Statuses.id == status_id).first()
-
     def list_statuses_by_status_set(self, status_set_id: int):
         return self.db.query(Statuses).filter(
             Statuses.status_set_id == status_set_id
         ).all()
-
     def list_all_statuses(self):
         return self.db.query(Statuses).all()
-
     def create_status(self, status_data: dict):
         status = Statuses(**status_data)
         self.db.add(status)
         self.commit_and_refresh(status)
         return status
-
     def update_status(self, status_id: int, status_data: dict):
         status = self.get_status(status_id)
         if not status:
@@ -1473,7 +1204,6 @@ class StatusService(BaseService):
             setattr(status, key, value)
         self.commit_and_refresh(status)
         return status
-
     def delete_status(self, status_id: int):
         status = self.get_status(status_id)
         if not status:
@@ -1483,30 +1213,63 @@ class StatusService(BaseService):
         return status
 
 # File: ./backend/app/services/attachment.py
-
+from .utils.service import BaseService
+from pathlib import Path
+from uuid import uuid4
+import aiofiles
+from datetime import datetime
+from core.config import settings
+from db.models.attachments import Attachments
+from fastapi import UploadFile
+import json
+from typing import Optional, Dict, Any
+def get_date_subdir() -> Path:
+    """Return the date-based subdirectory *relative to the upload root*."""
+    now = datetime.now()
+    return Path(str(now.year)) / f"{now.month:02}" / f"{now.day:02}"
+class AttachmentService(BaseService):
+    async def save_file(self, file: UploadFile, uploaded_by: int):
+        ext = Path(file.filename).suffix
+        if ext not in settings.ALLOWED_FILE_EXTENSIONS:
+            return None
+        contents = await file.read()
+        if len(contents) > settings.MAX_FILE_SIZE:
+            return None
+        date_dir = get_date_subdir()
+        full_dir = Path(settings.UPLOAD_DIR) / date_dir
+        full_dir.mkdir(parents=True, exist_ok=True)
+        stored_name = f"{uuid4()}{ext}"
+        dest = full_dir / stored_name
+        try:
+            async with aiofiles.open(dest, "wb") as f:
+                await f.write(contents)
+        except Exception:
+            return None
+        attachment = Attachments(
+            filename=file.filename,
+            relative_path=str(date_dir / stored_name),
+            uploaded_by=uploaded_by
+        )
+        self.db.add(attachment)
+        self.commit_and_refresh(attachment)
+        return attachment
 
 # File: ./backend/app/services/status_set.py
 from db.models.status_sets import StatusSets
 from sqlalchemy.orm import Session
 from .utils.service import BaseService
-
-
 class StatusSetService(BaseService):
     def get_status_set(self, status_set_id: int):
         return self.db.query(StatusSets).filter(StatusSets.id == status_set_id).first()
-
     def get_status_set_by_name(self, name: str):
         return self.db.query(StatusSets).filter(StatusSets.name == name).first()
-
     def list_status_sets(self):
         return self.db.query(StatusSets).all()
-
     def create_status_set(self, status_set_data):
         status_set = StatusSets(**status_set_data)
         self.db.add(status_set)
         self.commit_and_refresh(status_set)
         return status_set
-
     def update_status_set(self, status_set_id: int, status_set_data):
         status_set = self.get_status_set(status_set_id)
         if not status_set:
@@ -1515,7 +1278,6 @@ class StatusSetService(BaseService):
             setattr(status_set, key, value)
         self.commit_and_refresh(status_set)
         return status_set
-
     def delete_status_set(self, status_set_id: int):
         status_set = self.get_status_set(status_set_id)
         if not status_set:
@@ -1524,28 +1286,21 @@ class StatusSetService(BaseService):
         self.db.commit()
         return status_set
 
-
 # File: ./backend/app/services/user_group.py
 from db.models.user_groups import UserGroups
 from .utils.service import BaseService
-
-
 class UserGroupService(BaseService):
     def get_user_group(self, group_id: int):
         return self.db.query(UserGroups).filter(UserGroups.id == group_id).first()
-
     def get_user_group_by_name(self, name: str):
         return self.db.query(UserGroups).filter(UserGroups.name == name).first()
-
     def list_user_groups(self):
         return self.db.query(UserGroups).all()
-
     def create_user_group(self, group_data: dict):
         group = UserGroups(**group_data)
         self.db.add(group)
         self.commit_and_refresh(group)
         return group
-
     def update_user_group(self, group_id: int, group_data: dict):
         group = self.get_user_group(group_id)
         if not group:
@@ -1554,7 +1309,6 @@ class UserGroupService(BaseService):
             setattr(group, key, value)
         self.commit_and_refresh(group)
         return group
-
     def delete_user_group(self, group_id: int):
         group = self.get_user_group(group_id)
         if not group:
@@ -1564,20 +1318,15 @@ class UserGroupService(BaseService):
         return group
 
 # File: ./backend/app/services/session.py
-
 from datetime import datetime
 from sqlalchemy.orm import Session
 from db.models.sessions import Sessions
 from app.api.utils.sessions import generate_session_secret, hash_session_secret
 from .utils.service import BaseService
-
 class SessionService(BaseService):
-
     def create_session(self, user_id: int, expires_at: datetime, created_at: datetime) -> str:
-        
         session_secret = generate_session_secret()
         session_hash = hash_session_secret(session_secret)
-
         session = Sessions(
             user_id=user_id,
             token=session_hash,
@@ -1587,27 +1336,21 @@ class SessionService(BaseService):
         self.db.add(session)
         self.commit_and_refresh(session)
         return session_secret
-    
     def get_session(self, session_secret: str):
         session_hash = hash_session_secret(session_secret)
         session = self.db.query(Sessions).filter(Sessions.token == session_hash).first()
         if not session:
             return None
         return session
-    
     def delete_session(self, session_secret: str):
         session = self.get_session(session_secret)
-        
         if not session:
             return None
-        
         self.db.delete(session)
         self.db.commit()
         return session
-    
     def delete_all_sessions(self, user_id: int):
         sessions = self.db.query(Sessions).filter(Sessions.user_id == user_id).all()
-        
         for session in sessions:
             self.db.delete(session)
         self.commit_and_refresh(session)
@@ -1618,26 +1361,20 @@ from sqlalchemy.orm import Session, joinedload
 from db.models.devices import Devices
 from db.models.projects import Projects
 from .utils.service import BaseService
-
-
 class DeviceService(BaseService):
     def get_device(self, device_id: int):
         return self.db.query(Devices).filter(Devices.id == device_id).first()
-
     def get_device_with_project(self, device_id: int):
         return self.db.query(Devices).filter(Devices.id == device_id).options(
             joinedload(Devices.project)
         ).first()
-
     def list_devices_by_project(self, project_id: int):
         return self.db.query(Devices).filter(Devices.project_id == project_id).all()
-
     def create_device(self, device_data):
         device = Devices(**device_data)
         self.db.add(device)
         self.commit_and_refresh(device)
         return device
-
     def update_device(self, device_id: int, device_data):
         device = self.get_device(device_id)
         if not device:
@@ -1646,7 +1383,6 @@ class DeviceService(BaseService):
             setattr(device, key, value)
         self.commit_and_refresh(device)
         return device
-
     def delete_device(self, device_id: int):
         device = self.get_device(device_id)
         if not device:
@@ -1655,18 +1391,14 @@ class DeviceService(BaseService):
         self.db.commit()
         return device
 
-
 # File: ./backend/app/services/utils/service.py
 from sqlalchemy.orm import Session, joinedload
-
 class BaseService:
     def __init__(self, db: Session):
         self.db = db
-    
     def commit_and_refresh(self, object):
         self.db.commit()
         self.db.refresh(object)
-
 
 # File: ./backend/app/api/__init__.py
 from fastapi import APIRouter
@@ -1690,9 +1422,7 @@ from .v1 import (
     user_type,
     users,
 )
-
 api_router = APIRouter()
-
 api_router.include_router(attachment.router)
 api_router.include_router(auth.router)
 api_router.include_router(client.router)
@@ -1715,30 +1445,20 @@ api_router.include_router(users.router)
 # File: ./backend/app/api/utils/auth.py
 from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
-
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
-
-
-
 # File: ./backend/app/api/utils/users.py
 from datetime import datetime, timezone
-
 from fastapi import Depends, Cookie, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.services.session import SessionService
 from app.services.users import UserService
 from db.session import get_db
-
 from db.models.users import Users
 from db.models.user_types import UserTypes
-
-
 def get_current_user(
     session: str | None = Cookie(None),
     db: Session = Depends(get_db),
@@ -1748,34 +1468,28 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED, 
             detail="Not authenticated"
         )
-
     session_obj = SessionService(db).get_session(session)
     if not session_obj:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, 
             detail="Not authenticated"
         )
-
     expires_at = session_obj.expires_at
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
-
     if expires_at < datetime.now(timezone.utc):
         SessionService(db).delete_session(session)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, 
             detail="Session expired"
         )
-
     user = UserService(db).get_user_by_id(session_obj.user_id)
     if not user or not user.active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, 
             detail="Not authenticated"
         )
-
     return user
-
 async def get_current_admin_user(
     current_user: Users = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -1788,16 +1502,11 @@ async def get_current_admin_user(
         )
     return current_user
 
-
 # File: ./backend/app/api/utils/sessions.py
 import hashlib
 import secrets
-
-
 def generate_session_secret() -> str:
     return secrets.token_urlsafe(32)
-
-
 def hash_session_secret(secret: str) -> str:
     # Store session token hashes as hex strings so they can be stored in String columns.
     return hashlib.sha256(secret.encode()).hexdigest()
@@ -1814,12 +1523,10 @@ from db.session import get_db
 from db.models.users import Users
 from app.services.auth import AuthService
 from core.config import settings
-
 router = APIRouter(
     prefix="/auth",
     tags=["auth"],
 )
-
 @router.post("/login", response_model=TokenPayload)
 async def login(
     login_data: UserLogin,
@@ -1832,7 +1539,6 @@ async def login(
     )
     if not result:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
     response.set_cookie(
         key="session",
         value=result["access_token"],
@@ -1841,12 +1547,10 @@ async def login(
         samesite="lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_SECONDS
     )
-
     return TokenPayload(
         sub=result["user"].id,
         exp=int((datetime.now(timezone.utc) + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)).timestamp())
     )
-
 @router.post("/logout")
 async def logout(
     response: Response,
@@ -1855,16 +1559,12 @@ async def logout(
 ):
     if not session:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
     is_valid = AuthService(db).validate_session(session)
     if not is_valid:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
     AuthService(db).logout_user(session)
-
     response.delete_cookie(key="session")
     return UserLogout()
-    
 @router.post("/register", response_model=UserOut)
 async def register(
     login_data: UserRegister,
@@ -1879,7 +1579,6 @@ async def register(
     )
     if not result:
         raise HTTPException(status_code=400, detail="User already exists")
-
     return UserOut(
         id=result.id,
         email=result.email,
@@ -1891,19 +1590,15 @@ async def register(
         created_at=result.created_at,
         last_login_at=result.last_login_at
     )
-
-
 @router.get("/me", response_model=UserOut)
 async def get_current_user_info(
     current_user: Users = Depends(get_current_user),
 ):
     """Return the authenticated user's profile."""
     return current_user
-    
 
 # File: ./backend/app/api/v1/execution.py
 from fastapi import APIRouter
-
 router = APIRouter(
     prefix="/executions",
     tags=["executions"],
@@ -1913,19 +1608,15 @@ router = APIRouter(
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.test_case_version import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.test_case_version import TestCaseVersionService
-
 router = APIRouter(
     prefix="/test-case-versions",
     tags=["test-case-versions"],
 )
-
-
 @router.post("/", response_model=TestCaseVersionOut, status_code=status.HTTP_201_CREATED)
 def create_test_case_version(
     test_case_version_in: TestCaseVersionCreate,
@@ -1935,8 +1626,6 @@ def create_test_case_version(
     service = TestCaseVersionService(db)
     test_case_version = service.create_test_case_version(test_case_version_in.model_dump())
     return test_case_version
-
-
 @router.get("/{test_case_version_id}", response_model=TestCaseVersionOut)
 def get_test_case_version(
     test_case_version_id: int,
@@ -1947,8 +1636,6 @@ def get_test_case_version(
     if not test_case_version:
         raise HTTPException(status_code=404, detail="Test case version not found")
     return test_case_version
-
-
 @router.get("/test-case/{test_case_id}", response_model=List[TestCaseVersionOut])
 def list_test_case_versions_by_test_case(
     test_case_id: int,
@@ -1958,8 +1645,6 @@ def list_test_case_versions_by_test_case(
     service = TestCaseVersionService(db)
     test_case_versions = service.list_test_case_versions_by_test_case(test_case_id)
     return test_case_versions
-
-
 @router.patch("/{test_case_version_id}", response_model=TestCaseVersionOut)
 def update_test_case_version(
     test_case_version_id: int,
@@ -1971,13 +1656,11 @@ def update_test_case_version(
     if not test_case_version:
         raise HTTPException(status_code=404, detail="Test case version not found")
     return test_case_version
-
-
 @router.delete("/{test_case_version_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_test_case_version(
     test_case_version_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     test_case_version = TestCaseVersionService(db).delete_test_case_version(test_case_version_id)
     if not test_case_version:
@@ -1987,36 +1670,16 @@ def delete_test_case_version(
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.users import *
 from db.models.users import Users
 from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.users import UserService
-
 router = APIRouter(
     prefix="/users",
     tags=["users"],
 )
-
-
 # ---- Admin-only endpoints ----
-
-@router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def create_user(
-    user_in: UserCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
-    """Admin creates a new user."""
-    # Check if email already exists
-    existing = UserService(db).get_user_by_email(user_in.email)
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    user = UserService(db).create_user(user_in.model_dump())
-    return user
-
-
 @router.get("/", response_model=List[UserOut])
 def list_users(
     db: Session = Depends(get_db),
@@ -2024,9 +1687,7 @@ def list_users(
 ):
     """List all users (admin only)."""
     return UserService(db).list_users()
-
 # ---- Self-service endpoints ----
-
 @router.patch("/me", response_model=UserOut)
 def update_self(
     user_in: UserUpdateSelf,
@@ -2041,17 +1702,13 @@ def update_self(
             raise HTTPException(status_code=400, detail="Email already in use")
     user = UserService(db).update_user(current_user.id, user_in.model_dump(exclude_unset=True))
     return user
-
-
 @router.get("/me", response_model=UserOut)
 def get_self(
     current_user: Users = Depends(get_current_user),
 ):
     """Get current user profile (convenience duplicate of /auth/me)."""
     return current_user
-
 # ---- Admin-only endpoints for specific users ----
-
 @router.get("/{user_id}", response_model=UserOut)
 def get_user(
     user_id: int,
@@ -2063,8 +1720,6 @@ def get_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
-
-
 @router.patch("/{user_id}", response_model=UserOut)
 def admin_update_user(
     user_id: int,
@@ -2077,8 +1732,6 @@ def admin_update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
-
-
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
@@ -2090,26 +1743,19 @@ def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-
-
-
 # File: ./backend/app/api/v1/resolution.py
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.resolution import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.resolution import ResolutionService
-
 router = APIRouter(
     prefix="/resolutions",
     tags=["resolutions"],
 )
-
-
 @router.post("/", response_model=ResolutionOut, status_code=status.HTTP_201_CREATED)
 def create_resolution(
     resolution_in: ResolutionCreate,
@@ -2118,8 +1764,6 @@ def create_resolution(
 ):
     service = ResolutionService(db)
     return service.create_resolution(resolution_in.model_dump())
-
-
 @router.get("/{resolution_id}", response_model=ResolutionOut)
 def get_resolution(
     resolution_id: int,
@@ -2130,16 +1774,12 @@ def get_resolution(
     if not resolution:
         raise HTTPException(status_code=404, detail="Resolution not found")
     return resolution
-
-
 @router.get("/", response_model=List[ResolutionOut])
 def list_resolutions(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
     return ResolutionService(db).list_resolutions()
-
-
 @router.patch("/{resolution_id}", response_model=ResolutionOut)
 def update_resolution(
     resolution_id: int,
@@ -2153,13 +1793,11 @@ def update_resolution(
     if not resolution:
         raise HTTPException(status_code=404, detail="Resolution not found")
     return resolution
-
-
 @router.delete("/{resolution_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_resolution(
     resolution_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     resolution = ResolutionService(db).delete_resolution(resolution_id)
     if not resolution:
@@ -2169,19 +1807,15 @@ def delete_resolution(
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.test_case import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.test_case import TestCaseService
-
 router = APIRouter(
     prefix="/test-cases",
     tags=["test-cases"],
 )
-
-
 @router.post("/", response_model=TestCaseOut, status_code=status.HTTP_201_CREATED)
 def create_test_case(
     test_case_in: TestCaseCreate,
@@ -2191,8 +1825,6 @@ def create_test_case(
     service = TestCaseService(db)
     test_case = service.create_test_case(test_case_in.model_dump())
     return test_case
-
-
 @router.post("/bulk", response_model=TestCaseBulkCreateOut, status_code=status.HTTP_201_CREATED)
 def create_test_cases_bulk(
     bulk_in: TestCaseBulkCreateIn,
@@ -2206,8 +1838,6 @@ def create_test_cases_bulk(
         test_suite_id=bulk_in.test_suite_id,
     )
     return TestCaseBulkCreateOut(created=results)
-
-
 @router.get("/{test_case_id}", response_model=TestCaseOut)
 def get_test_case(
     test_case_id: int,
@@ -2218,8 +1848,6 @@ def get_test_case(
     if not test_case:
         raise HTTPException(status_code=404, detail="Test case not found")
     return test_case
-
-
 @router.get("/", response_model=List[TestCaseOut])
 def list_test_cases(
     db: Session = Depends(get_db),
@@ -2228,8 +1856,6 @@ def list_test_cases(
     service = TestCaseService(db)
     test_cases = service.list_test_cases()
     return test_cases
-
-
 @router.patch("/{test_case_id}", response_model=TestCaseOut)
 def update_test_case(
     test_case_id: int,
@@ -2241,13 +1867,11 @@ def update_test_case(
     if not test_case:
         raise HTTPException(status_code=404, detail="Test case not found")
     return test_case
-
-
 @router.delete("/{test_case_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_test_case(
     test_case_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     test_case = TestCaseService(db).delete_test_case(test_case_id)
     if not test_case:
@@ -2258,20 +1882,16 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from db.session import get_db
-
 from app.schemas.client import *
 from db.models.clients import Clients
 from db.models.projects import Projects
 from db.models.users import Users
-from app.api.utils.users import get_current_user
-
+from app.api.utils.users import get_current_user, get_current_admin_user
 from app.services.client import ClientService
-
 router = APIRouter(
     prefix="/clients",
     tags=["clients"],
 )
-
 @router.post("/", response_model=ClientOut, status_code=status.HTTP_201_CREATED)
 def create_client(
     client_in: ClientCreate,
@@ -2281,7 +1901,6 @@ def create_client(
     service = ClientService(db)
     client = service.create_client(client_in.model_dump())
     return client
-
 @router.get("/{client_id}", response_model=ClientOut)
 def get_client(
     client_id: int,
@@ -2292,7 +1911,6 @@ def get_client(
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client
-
 @router.get("/{client_id}/with-projects", response_model=ClientWithProjects)
 def get_client_with_projects(
     client_id: int,
@@ -2303,7 +1921,6 @@ def get_client_with_projects(
     if not client_with_projects:
         raise HTTPException(status_code=404, detail="Client not found")
     return client_with_projects
-
 @router.patch("/{client_id}", response_model=ClientOut)
 def update_client(
     client_id: int,
@@ -2315,29 +1932,32 @@ def update_client(
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     return client
-    
-
+@router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_client(
+    client_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_admin_user),
+):
+    client = ClientService(db).delete_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
 
 # File: ./backend/app/api/v1/project.py
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from db.session import get_db
-
 from app.schemas.client import *
 from app.schemas.project import *
 from db.models.clients import Clients
 from db.models.projects import Projects
 from db.models.users import Users
-from app.api.utils.users import get_current_user
-
+from app.api.utils.users import get_current_user, get_current_admin_user
 from app.services.project import ProjectService
-
 router = APIRouter(
     prefix="/projects",
     tags=["projects"],
 )
-
 @router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(
     project_in: ProjectCreate,
@@ -2347,7 +1967,6 @@ def create_project(
     service = ProjectService(db)
     project = service.create_project(project_in.model_dump())
     return project
-
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(
     project_id: int,
@@ -2358,7 +1977,6 @@ def get_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
-
 @router.get("/{project_id}/with-client", response_model=ProjectWithClient)
 def get_project_with_client(
     project_id: int,
@@ -2369,7 +1987,6 @@ def get_project_with_client(
     if not project_with_client:
         raise HTTPException(status_code=404, detail="Project not found")
     return project_with_client
-
 @router.patch("/{project_id}", response_model=ProjectOut)
 def update_project(
     project_id: int,
@@ -2381,24 +1998,29 @@ def update_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_admin_user),
+):
+    project = ProjectService(db).delete_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
 
 # File: ./backend/app/api/v1/scenario.py
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.scenario import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.scenario import ScenarioService
-
 router = APIRouter(
     prefix="/scenarios",
     tags=["scenarios"],
 )
-
-
 @router.post("/", response_model=ScenarioOut, status_code=status.HTTP_201_CREATED)
 def create_scenario(
     scenario_in: ScenarioCreate,
@@ -2407,8 +2029,6 @@ def create_scenario(
 ):
     service = ScenarioService(db)
     return service.create_scenario(scenario_in.model_dump())
-
-
 @router.get("/{scenario_id}", response_model=ScenarioOut)
 def get_scenario(
     scenario_id: int,
@@ -2419,16 +2039,12 @@ def get_scenario(
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
     return scenario
-
-
 @router.get("/", response_model=List[ScenarioOut])
 def list_scenarios(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
     return ScenarioService(db).list_scenarios()
-
-
 @router.patch("/{scenario_id}", response_model=ScenarioOut)
 def update_scenario(
     scenario_id: int,
@@ -2442,13 +2058,11 @@ def update_scenario(
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
     return scenario
-
-
 @router.delete("/{scenario_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_scenario(
     scenario_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     scenario = ScenarioService(db).delete_scenario(scenario_id)
     if not scenario:
@@ -2458,29 +2072,23 @@ def delete_scenario(
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.user_type import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.user_type import UserTypeService
-
 router = APIRouter(
     prefix="/user-types",
     tags=["user-types"],
 )
-
-
 @router.post("/", response_model=UserTypeOut, status_code=status.HTTP_201_CREATED)
 def create_user_type(
     user_type_in: UserTypeCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     service = UserTypeService(db)
     return service.create_user_type(user_type_in.model_dump())
-
-
 @router.get("/{user_type_id}", response_model=UserTypeOut)
 def get_user_type(
     user_type_id: int,
@@ -2491,8 +2099,6 @@ def get_user_type(
     if not user_type:
         raise HTTPException(status_code=404, detail="User type not found")
     return user_type
-
-
 @router.get("/", response_model=List[UserTypeOut])
 def list_user_types(
     db: Session = Depends(get_db),
@@ -2501,8 +2107,6 @@ def list_user_types(
     # simple list; the service currently doesn't have a list method, but we can query directly
     from db.models.user_types import UserTypes
     return db.query(UserTypes).all()
-
-
 @router.patch("/{user_type_id}", response_model=UserTypeOut)
 def update_user_type(
     user_type_id: int,
@@ -2516,13 +2120,11 @@ def update_user_type(
     if not user_type:
         raise HTTPException(status_code=404, detail="User type not found")
     return user_type
-
-
 @router.delete("/{user_type_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user_type(
     user_type_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     # we add a delete method to the service or delete directly
     from db.models.user_types import UserTypes
@@ -2536,19 +2138,15 @@ def delete_user_type(
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.test_suite import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.test_suite import TestSuiteService
-
 router = APIRouter(
     prefix="/test-suites",
     tags=["test-suites"],
 )
-
-
 @router.post("/", response_model=TestSuiteOut, status_code=status.HTTP_201_CREATED)
 def create_test_suite(
     test_suite_in: TestSuiteCreate,
@@ -2558,8 +2156,6 @@ def create_test_suite(
     service = TestSuiteService(db)
     test_suite = service.create_test_suite(test_suite_in.model_dump())
     return test_suite
-
-
 @router.get("/{test_suite_id}", response_model=TestSuiteOut)
 def get_test_suite(
     test_suite_id: int,
@@ -2570,8 +2166,6 @@ def get_test_suite(
     if not test_suite:
         raise HTTPException(status_code=404, detail="Test suite not found")
     return test_suite
-
-
 @router.get("/", response_model=List[TestSuiteOut])
 def list_test_suites(
     db: Session = Depends(get_db),
@@ -2580,8 +2174,6 @@ def list_test_suites(
     service = TestSuiteService(db)
     test_suites = service.list_test_suites()
     return test_suites
-
-
 @router.get("/by-name/{name}", response_model=TestSuiteOut)
 def get_test_suite_by_name(
     name: str,
@@ -2589,7 +2181,6 @@ def get_test_suite_by_name(
     current_user: Users = Depends(get_current_user),
 ):
     """Look up a test suite by its unique name.
- 
     Returns 404 if no suite with that name exists, so the frontend can
     branch cleanly: found → use the id; not found → call POST /test-suites/.
     """
@@ -2597,8 +2188,6 @@ def get_test_suite_by_name(
     if not test_suite:
         raise HTTPException(status_code=404, detail="Test suite not found")
     return test_suite
-
-
 @router.patch("/{test_suite_id}", response_model=TestSuiteOut)
 def update_test_suite(
     test_suite_id: int,
@@ -2610,13 +2199,11 @@ def update_test_suite(
     if not test_suite:
         raise HTTPException(status_code=404, detail="Test suite not found")
     return test_suite
-
-
 @router.delete("/{test_suite_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_test_suite(
     test_suite_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     test_suite = TestSuiteService(db).delete_test_suite(test_suite_id)
     if not test_suite:
@@ -2628,16 +2215,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from db.session import get_db
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from app.services.run import RunService
 from app.schemas.run import *
-
 router = APIRouter(
     prefix="/runs",
     tags=["runs"],
 )
-
-
 @router.post("/", response_model=RunOut, status_code=status.HTTP_201_CREATED)
 def create_run(
     run_in: RunCreate,
@@ -2647,8 +2231,6 @@ def create_run(
     service = RunService(db)
     run = service.create_run(run_in.model_dump())
     return run
-
-
 @router.get("/{run_id}", response_model=RunOut, status_code=status.HTTP_200_OK)
 def get_run(
     run_id: int,
@@ -2659,8 +2241,6 @@ def get_run(
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
-
-
 @router.get("/project/{project_id}", response_model=List[RunOut])
 def list_runs_by_project(
     project_id: int,
@@ -2669,8 +2249,6 @@ def list_runs_by_project(
 ):
     runs = RunService(db).list_runs_by_project(project_id)
     return runs
-
-
 @router.patch("/{run_id}", response_model=RunOut)
 def update_run(
     run_id: int,
@@ -2682,41 +2260,31 @@ def update_run(
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
-
-
 @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_run(
     run_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     run = RunService(db).delete_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    
-
-
-
 
 # File: ./backend/app/api/v1/suitcase.py
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.suitcase import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.suitcase import SuitcaseService
 from db.models.test_cases import TestCases
 from db.models.test_suites import TestSuites
-
 router = APIRouter(
     prefix="/suitcases",
     tags=["suitcases"],
 )
-
-
 @router.post("/", response_model=SuitcaseOut, status_code=status.HTTP_201_CREATED)
 def create_suitcase(
     suitcase_in: SuitcaseCreate,
@@ -2726,7 +2294,6 @@ def create_suitcase(
     service = SuitcaseService(db)
     suitcase = service.create_suitcase(suitcase_in.model_dump())
     return suitcase
-
 @router.post("/bulk", response_model=SuitcaseBulkCreateOut, status_code=status.HTTP_201_CREATED)
 def create_suitcases_bulk(
     bulk_in: SuitcaseBulkCreateIn,
@@ -2737,7 +2304,6 @@ def create_suitcases_bulk(
     suite = db.query(TestSuites).filter(TestSuites.id == bulk_in.test_suite_id).first()
     if not suite:
         raise HTTPException(status_code=404, detail="Test suite not found")
- 
     # Validate all test case ids exist
     found_ids = {
         row.id
@@ -2751,13 +2317,11 @@ def create_suitcases_bulk(
             status_code=404,
             detail=f"Test cases not found: {sorted(missing)}",
         )
- 
     result = SuitcaseService(db).create_suitcases_bulk(
         test_suite_id=bulk_in.test_suite_id,
         test_case_ids=bulk_in.test_case_ids,
     )
     return SuitcaseBulkCreateOut(**result)
-
 @router.get("/{suitcase_id}", response_model=SuitcaseOut)
 def get_suitcase(
     suitcase_id: int,
@@ -2768,8 +2332,6 @@ def get_suitcase(
     if not suitcase:
         raise HTTPException(status_code=404, detail="Suitcase not found")
     return suitcase
-
-
 @router.get("/test-case/{test_case_id}", response_model=List[SuitcaseOut])
 def list_suitcases_by_test_case(
     test_case_id: int,
@@ -2778,8 +2340,6 @@ def list_suitcases_by_test_case(
 ):
     suitcases = SuitcaseService(db).get_suitcases_by_test_case_id(test_case_id)
     return suitcases
-
-
 @router.get("/test-suite/{test_suite_id}", response_model=List[SuitcaseOut])
 def list_suitcases_by_test_suite(
     test_suite_id: int,
@@ -2788,8 +2348,6 @@ def list_suitcases_by_test_suite(
 ):
     suitcases = SuitcaseService(db).get_suitcases_by_test_suite_id(test_suite_id)
     return suitcases
-
-
 @router.patch("/{suitcase_id}", response_model=SuitcaseOut)
 def update_suitcase(
     suitcase_id: int,
@@ -2801,13 +2359,11 @@ def update_suitcase(
     if not suitcase:
         raise HTTPException(status_code=404, detail="Suitcase not found")
     return suitcase
-
-
 @router.delete("/{suitcase_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_suitcase(
     suitcase_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     suitcase = SuitcaseService(db).delete_suitcase(suitcase_id)
     if not suitcase:
@@ -2817,19 +2373,15 @@ def delete_suitcase(
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-
 from app.schemas.status import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.status import StatusService
-
 router = APIRouter(
     prefix="/status",
     tags=["status"],
 )
-
-
 @router.post("/", response_model=StatusOut, status_code=status.HTTP_201_CREATED)
 def create_status(
     status_in: StatusCreate,
@@ -2838,8 +2390,6 @@ def create_status(
 ):
     service = StatusService(db)
     return service.create_status(status_in.model_dump())
-
-
 @router.get("/{status_id}", response_model=StatusOut)
 def get_status(
     status_id: int,
@@ -2850,8 +2400,6 @@ def get_status(
     if not status_obj:
         raise HTTPException(status_code=404, detail="Status not found")
     return status_obj
-
-
 @router.get("/", response_model=List[StatusOut])
 def list_statuses(
     status_set_id: Optional[int] = Query(None, description="Filter by status set ID"),
@@ -2862,8 +2410,6 @@ def list_statuses(
     if status_set_id is not None:
         return service.list_statuses_by_status_set(status_set_id)
     return service.list_all_statuses()
-
-
 @router.patch("/{status_id}", response_model=StatusOut)
 def update_status(
     status_id: int,
@@ -2877,43 +2423,53 @@ def update_status(
     if not status_obj:
         raise HTTPException(status_code=404, detail="Status not found")
     return status_obj
-
-
 @router.delete("/{status_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_status(
     status_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     status_obj = StatusService(db).delete_status(status_id)
     if not status_obj:
         raise HTTPException(status_code=404, detail="Status not found")
 
 # File: ./backend/app/api/v1/attachment.py
-from fastapi import APIRouter
-
+from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.services.attachment import AttachmentService
+from app.schemas.attachment import AttachmentOut
+from db.session import get_db
+from app.api.utils.users import get_current_user
+from db.models.users import Users
 router = APIRouter(
     prefix="/attachments",
     tags=["attachments"],
 )
+@router.post("/upload", response_model=AttachmentOut, status_code=status.HTTP_201_CREATED)
+async def upload_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    service = AttachmentService(db)
+    attachment = await service.save_file(file, current_user.id)
+    if not attachment:
+        raise HTTPException(status_code=400, detail="File could not be saved")
+    return attachment
 
 # File: ./backend/app/api/v1/status_set.py
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.status_set import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.status_set import StatusSetService
-
 router = APIRouter(
     prefix="/status-sets",
     tags=["status-sets"],
 )
-
-
 @router.post("/", response_model=StatusSetOut, status_code=status.HTTP_201_CREATED)
 def create_status_set(
     status_set_in: StatusSetCreate,
@@ -2922,8 +2478,6 @@ def create_status_set(
 ):
     service = StatusSetService(db)
     return service.create_status_set(status_set_in.model_dump())
-
-
 @router.get("/{status_set_id}", response_model=StatusSetOut)
 def get_status_set(
     status_set_id: int,
@@ -2934,16 +2488,12 @@ def get_status_set(
     if not status_set:
         raise HTTPException(status_code=404, detail="Status set not found")
     return status_set
-
-
 @router.get("/", response_model=List[StatusSetOut])
 def list_status_sets(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
     return StatusSetService(db).list_status_sets()
-
-
 @router.patch("/{status_set_id}", response_model=StatusSetOut)
 def update_status_set(
     status_set_id: int,
@@ -2957,13 +2507,11 @@ def update_status_set(
     if not status_set:
         raise HTTPException(status_code=404, detail="Status set not found")
     return status_set
-
-
 @router.delete("/{status_set_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_status_set(
     status_set_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     status_set = StatusSetService(db).delete_status_set(status_set_id)
     if not status_set:
@@ -2973,19 +2521,15 @@ def delete_status_set(
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.user_group import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.user_group import UserGroupService
-
 router = APIRouter(
     prefix="/user-groups",
     tags=["user-groups"],
 )
-
-
 @router.post("/", response_model=UserGroupOut, status_code=status.HTTP_201_CREATED)
 def create_user_group(
     group_in: UserGroupCreate,
@@ -2997,8 +2541,6 @@ def create_user_group(
     data = group_in.model_dump()
     data["created_by_id"] = current_user.id
     return service.create_user_group(data)
-
-
 @router.get("/{group_id}", response_model=UserGroupOut)
 def get_user_group(
     group_id: int,
@@ -3009,16 +2551,12 @@ def get_user_group(
     if not group:
         raise HTTPException(status_code=404, detail="User group not found")
     return group
-
-
 @router.get("/", response_model=List[UserGroupOut])
 def list_user_groups(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
     return UserGroupService(db).list_user_groups()
-
-
 @router.patch("/{group_id}", response_model=UserGroupOut)
 def update_user_group(
     group_id: int,
@@ -3032,13 +2570,11 @@ def update_user_group(
     if not group:
         raise HTTPException(status_code=404, detail="User group not found")
     return group
-
-
 @router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user_group(
     group_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     group = UserGroupService(db).delete_user_group(group_id)
     if not group:
@@ -3048,19 +2584,15 @@ def delete_user_group(
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.schemas.device import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.session import get_db
 from app.services.device import DeviceService
-
 router = APIRouter(
     prefix="/devices",
     tags=["devices"],
 )
-
-
 @router.post("/", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
 def create_device(
     device_in: DeviceCreate,
@@ -3070,8 +2602,6 @@ def create_device(
     service = DeviceService(db)
     device = service.create_device(device_in.model_dump())
     return device
-
-
 @router.get("/{device_id}", response_model=DeviceOut)
 def get_device(
     device_id: int,
@@ -3082,8 +2612,6 @@ def get_device(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
-
-
 @router.get("/project/{project_id}", response_model=List[DeviceOut])
 def list_devices_by_project(
     project_id: int,
@@ -3092,8 +2620,6 @@ def list_devices_by_project(
 ):
     devices = DeviceService(db).list_devices_by_project(project_id)
     return devices
-
-
 @router.patch("/{device_id}", response_model=DeviceOut)
 def update_device(
     device_id: int,
@@ -3105,13 +2631,11 @@ def update_device(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
-
-
 @router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_device(
     device_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(get_current_admin_user),
 ):
     device = DeviceService(db).delete_device(device_id)
     if not device:
@@ -3119,28 +2643,22 @@ def delete_device(
 
 # File: ./backend/app/schemas/auth.py
 from pydantic import BaseModel, EmailStr, Field
-
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
-
 class UserRegister(BaseModel):
     first_name: str
     last_name: str
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=72)
-
 class UserLogout(BaseModel):
     pass
-
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
-
 class TokenPayload(BaseModel):
     sub: int   # user id
     exp: int
-
 
 # File: ./backend/app/schemas/execution.py
 
@@ -3149,8 +2667,6 @@ class TokenPayload(BaseModel):
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
-
-
 class TestCaseVersionBase(BaseModel):
     test_case_id: int
     version: int
@@ -3159,50 +2675,37 @@ class TestCaseVersionBase(BaseModel):
     steps: Optional[str] = None
     expected_result: Optional[str] = None
     release_ready: bool = False
-
-
 class TestCaseVersionCreate(TestCaseVersionBase):
     created_by: int
-
-
 class TestCaseVersionUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     steps: Optional[str] = None
     expected_result: Optional[str] = None
     release_ready: Optional[bool] = None
-
-
 class TestCaseVersionOut(TestCaseVersionBase):
     id: int
     created_by: int
     created_at: datetime
-
     model_config = ConfigDict(from_attributes=True)
-
 
 # File: ./backend/app/schemas/users.py
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
-
-
 class UserCreate(BaseModel):
     email: EmailStr
     first_name: str
     last_name: str
     password: str = Field(..., min_length=8)
-
 class UserUpdateSelf(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     email: EmailStr | None = None
     password: str | None = Field(None, min_length=8)
-
 class UserUpdateAdmin(BaseModel):
     user_group_id: int | None = None
     user_type_id: int | None = None
     active: bool | None = None
-
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -3217,51 +2720,35 @@ class UserOut(BaseModel):
 
 # File: ./backend/app/schemas/resolution.py
 from pydantic import BaseModel, Field, ConfigDict
-
 class ResolutionBase(BaseModel):
     w: int
     h: int
-
 class ResolutionCreate(ResolutionBase):
     pass
-
 class ResolutionUpdate(BaseModel):
     w: int | None = None
     h: int | None = None
-
 class ResolutionOut(ResolutionBase):
     id: int
     w: int
     h: int
-
     model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/test_case.py
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
-
-
 class TestCaseBase(BaseModel):
     scenario_id: int
     status_set_id: int
-
-
 class TestCaseCreate(TestCaseBase):
     pass
-
-
 class TestCaseUpdate(BaseModel):
     scenario_id: Optional[int] = None
     status_set_id: Optional[int] = None
-
-
 class TestCaseOut(TestCaseBase):
     id: int
-
     model_config = ConfigDict(from_attributes=True)
-
 class TestCaseWithVersionCreate(BaseModel):
-
     scenario_id: int
     status_set_id: int
     # Version fields (always version=1 for new test cases)
@@ -3270,171 +2757,111 @@ class TestCaseWithVersionCreate(BaseModel):
     steps: Optional[str] = None
     expected_result: Optional[str] = None
     release_ready: bool = False
- 
- 
 class TestCaseWithVersionOut(BaseModel):
     """What we return for each created item."""
     test_case_id: int
     test_case_version_id: int
     version: int
- 
     model_config = ConfigDict(from_attributes=True)
- 
- 
 class TestCaseBulkCreateIn(BaseModel):
     """Request body for POST /test-cases/bulk."""
     test_suite_id: Optional[int] = None
     test_cases: List[TestCaseWithVersionCreate] = Field(..., min_length=1)
- 
- 
 class TestCaseBulkCreateOut(BaseModel):
     """Response body for POST /test-cases/bulk."""
     created: List[TestCaseWithVersionOut]
 
-
 # File: ./backend/app/schemas/client.py
 from pydantic import BaseModel, Field, ConfigDict
 from app.schemas.project import ProjectOut
-
 class ClientBase(BaseModel):
     name: str = Field(..., max_length=255)
-
-
 class ClientCreate(ClientBase):
     pass
-
-
 class ClientUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
-
-
 class ClientOut(BaseModel):
     id: int
     name: str
-
     model_config = ConfigDict(from_attributes=True)
-
-
 class ClientWithProjects(ClientOut):
     projects: list[ProjectOut]
-
     model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/project.py
 from pydantic import BaseModel, Field, ConfigDict
-
 class ProjectBase(BaseModel):
     name: str = Field(..., max_length=255)
     client_id: int
-
 class ProjectCreate(ProjectBase):
     pass
-
 class ProjectUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
     client_id: int | None = None
-
 class ProjectOut(ProjectBase):
     id: int
     name: str
     client_id: int
-
     model_config = ConfigDict(from_attributes=True)
-
 class ProjectWithClient(ProjectOut):
     client_id: int
-
     model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/scenario.py
 from pydantic import BaseModel, Field, ConfigDict
-
-
 class ScenarioBase(BaseModel):
     name: str = Field(..., max_length=255)
-
-
 class ScenarioCreate(ScenarioBase):
     pass
-
-
 class ScenarioUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
-
-
 class ScenarioOut(ScenarioBase):
     id: int
-
     model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/user_type.py
 from pydantic import BaseModel, Field, ConfigDict
-
 class UserTypeBase(BaseModel):
     name: str = Field(..., max_length=100)
     description: str | None = None
-
-
 class UserTypeCreate(UserTypeBase):
     pass
-
-
 class UserTypeUpdate(BaseModel):
     name: str | None = Field(None, max_length=100)
     description: str | None = None
-
-
 class UserTypeOut(UserTypeBase):
     id: int
-
     model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/test_suite.py
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
-
-
 class TestSuiteBase(BaseModel):
     name: str = Field(..., max_length=255)
-
-
 class TestSuiteCreate(TestSuiteBase):
     pass
-
-
 class TestSuiteUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255)
-
-
 class TestSuiteOut(TestSuiteBase):
     id: int
-
     model_config = ConfigDict(from_attributes=True)
-
 
 # File: ./backend/app/schemas/run.py
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from typing import Optional
-
 class RunBase(BaseModel):
     name: str = Field(..., max_length=255)
     project_id: int
-
-
 class RunCreate(RunBase):
     started_at: Optional[datetime] = None
     done_at: Optional[datetime] = None
     test_suite_metadata: Optional[str] = None
-
-
 class RunUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255)
     started_at: Optional[datetime] = None
     done_at: Optional[datetime] = None
     test_suite_metadata: Optional[str] = None
-
-
 class RunOut(BaseModel):
     id: int
     name: str
@@ -3442,38 +2869,25 @@ class RunOut(BaseModel):
     started_at: Optional[datetime]
     done_at: Optional[datetime]
     test_suite_metadata: Optional[str]
-
     model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/suitcase.py
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
-
-
 class SuitcaseBase(BaseModel):
     test_case_id: int
     test_suite_id: int
-
-
 class SuitcaseCreate(SuitcaseBase):
     pass
-
-
 class SuitcaseUpdate(BaseModel):
     test_case_id: Optional[int] = None
     test_suite_id: Optional[int] = None
-
-
 class SuitcaseOut(SuitcaseBase):
     id: int
-
     model_config = ConfigDict(from_attributes=True)
-
 class SuitcaseBulkCreateIn(BaseModel):
     test_suite_id: int
     test_case_ids: List[int] = Field(..., min_length=1)
- 
- 
 class SuitcaseBulkCreateOut(BaseModel):
     created: List[SuitcaseOut]
     skipped_duplicate_test_case_ids: List[int]
@@ -3481,45 +2895,34 @@ class SuitcaseBulkCreateOut(BaseModel):
 # File: ./backend/app/schemas/status.py
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
-
-
 class StatusBase(BaseModel):
     status_set_id: int
     name: str = Field(..., max_length=255)
     description: Optional[str] = None
-
-
 class StatusCreate(StatusBase):
     pass
-
-
 class StatusUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
-
-
 class StatusOut(StatusBase):
     id: int
-
     model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/attachment.py
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Dict, Any
 from datetime import datetime
-
+'''
 class AttachmentBase(BaseModel):
     resolution_id: Optional[int] = None
     settings: Optional[Dict[str, Any]] = None
-
-class AttachmentCreateInternal(BaseModel):
-    uploaded_by: int
-    filename: str
-    relative_path: str
-    resolution_id: Optional[int]
-    settings: Optional[dict]
-    presentmon_version: Optional[str]
-
+'''
+'''
+class AttachmentUploadForm(BaseModel):
+    resolution_id: Optional[int] = Field(None, form=True)
+    settings: Optional[str] = Field(None, form=True)
+    presentmon_version: Optional[str] = Field(None, form=True)
+'''
 class AttachmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -3527,55 +2930,35 @@ class AttachmentOut(BaseModel):
     uploaded_by: int
     filename: str
 
-
-
 # File: ./backend/app/schemas/status_set.py
 from pydantic import BaseModel, Field, ConfigDict
-
-
 class StatusSetBase(BaseModel):
     name: str = Field(..., max_length=255)
-
-
 class StatusSetCreate(StatusSetBase):
     pass
-
-
 class StatusSetUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
-
-
 class StatusSetOut(StatusSetBase):
     id: int
-
     model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/user_group.py
 from pydantic import BaseModel, Field, ConfigDict
-
 class UserGroupBase(BaseModel):
     name: str = Field(..., max_length=100)
-
-
 class UserGroupCreate(UserGroupBase):
     owner_id: int
-
-
 class UserGroupUpdate(BaseModel):
     name: str | None = Field(None, max_length=100)
     owner_id: int | None = None
-
-
 class UserGroupOut(UserGroupBase):
     id: int
     owner_id: int
     created_by_id: int
-
     model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/device.py
 from pydantic import BaseModel, Field, ConfigDict
-
 class DeviceBase(BaseModel):
     name_external: str = Field(..., max_length=255)
     name_internal: str | None = Field(None, max_length=255)
@@ -3583,10 +2966,8 @@ class DeviceBase(BaseModel):
     gpu: str | None = Field(None, max_length=255)
     ram: int | None = None
     project_id: int
-
 class DeviceCreate(DeviceBase):
     pass
-
 class DeviceUpdate(BaseModel):
     name_external: str | None = Field(None, max_length=255)
     name_internal: str | None = Field(None, max_length=255)
@@ -3594,7 +2975,6 @@ class DeviceUpdate(BaseModel):
     gpu: str | None = Field(None, max_length=255)
     ram: int | None = None
     project_id: int | None = None
-
 class DeviceOut(DeviceBase):
     id: int
     name_external: str
@@ -3602,6 +2982,5 @@ class DeviceOut(DeviceBase):
     cpu: str | None
     gpu: str | None
     ram: int | None
-
     model_config = ConfigDict(from_attributes=True)
 

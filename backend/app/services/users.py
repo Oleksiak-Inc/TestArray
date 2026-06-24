@@ -1,6 +1,7 @@
 from db.models.users import Users
 from sqlalchemy.orm import Session
 from .utils.service import BaseService
+from app.api.utils.auth import hash_password
 
 class UserService(BaseService):
 
@@ -20,7 +21,7 @@ class UserService(BaseService):
         user = self.get_user_by_id(user_id)
         if not user:
             return None
-        # If password is being updated, hash it
+
         if "password" in user_data and user_data["password"] is not None:
             user_data["password"] = hash_password(user_data["password"])
         for key, value in user_data.items():

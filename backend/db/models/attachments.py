@@ -10,15 +10,15 @@ class Attachments(Base):
 
     parent_attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
     uploaded_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
-    resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
+    #resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
 
     filename = Column(String)
     relative_path = Column(String)
 
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
-    presentmon_version = Column(String)
+    #presentmon_version = Column(String)
 
-    settings = Column(JSON)
+    #settings = Column(JSON)
 
     parent = relationship(
         "Attachments",
@@ -27,7 +27,7 @@ class Attachments(Base):
     )
 
     uploader = relationship("Users", back_populates="uploads", foreign_keys=[uploaded_by])
-    resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
+    #resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
     executions = relationship("Executions", back_populates="attachment", foreign_keys="Executions.attachment_id")
 
 
@@ -36,5 +36,5 @@ class Attachments(Base):
         Index("attachment_uploaded_by_idx", "uploaded_by"),
         Index("attachment_filename_idx", "filename"),
         Index("attachment_uploaded_at_idx", "uploaded_at"),
-        Index("attachment_resolution_idx", "resolution_id"),
+        #Index("attachment_resolution_idx", "resolution_id"),
     )

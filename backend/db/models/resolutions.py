@@ -9,10 +9,10 @@ class Resolutions(Base):
     h = Column(Integer, nullable=False)
     w = Column(Integer, nullable=False)
 
-    attachments = relationship(
-        "Attachments",
+    executions = relationship(
+        "Executions",
         back_populates="resolution",
-        foreign_keys="Attachments.resolution_id"
+        foreign_keys="Executions.resolution_id"
     )
 
     __table_args__ = (

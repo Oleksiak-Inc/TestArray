@@ -15,6 +15,7 @@ class Executions(Base):
     status_id = Column(Integer, ForeignKey("statuses.id",use_alter=True), nullable=False)
 
     attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
+    resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
 
     actual_result = Column(Text)
     executed_at = Column(DateTime(timezone=True))
@@ -27,6 +28,7 @@ class Executions(Base):
     executor = relationship("Users", foreign_keys=[executed_by], back_populates="executions")
     status = relationship("Statuses", back_populates="executions", foreign_keys=[status_id])
     attachment = relationship("Attachments", back_populates="executions", foreign_keys=[attachment_id])
+    resolution = relationship("Resolutions", back_populates="executions", foreign_keys=[resolution_id])
 
     __table_args__ = (
         UniqueConstraint(

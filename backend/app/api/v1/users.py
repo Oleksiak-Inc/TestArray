@@ -15,22 +15,6 @@ router = APIRouter(
 
 
 # ---- Admin-only endpoints ----
-
-@router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def create_user(
-    user_in: UserCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
-    """Admin creates a new user."""
-    # Check if email already exists
-    existing = UserService(db).get_user_by_email(user_in.email)
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    user = UserService(db).create_user(user_in.model_dump())
-    return user
-
-
 @router.get("/", response_model=List[UserOut])
 def list_users(
     db: Session = Depends(get_db),

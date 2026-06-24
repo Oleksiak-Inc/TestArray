@@ -42,8 +42,9 @@ class Settings(BaseSettings):
     FRONTEND_ORIGINS: str
 
     UPLOAD_DIR: str
+    CHUNK_SIZE: int
+    MAX_FILE_SIZE: int
 
-    MAX_FILE_SIZE: int = 100 * (1024 ** 2)
     ALLOWED_FILE_EXTENSIONS: set = {
         ".txt",
         ".pdf",
