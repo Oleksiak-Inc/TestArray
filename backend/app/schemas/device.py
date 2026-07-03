@@ -5,7 +5,7 @@ class DeviceBase(BaseModel):
     name_internal: str | None = Field(None, max_length=255)
     cpu: str | None = Field(None, max_length=255)
     gpu: str | None = Field(None, max_length=255)
-    ram: int | None = None
+    ram: int | str | None = None
     project_id: int
 
 class DeviceCreate(DeviceBase):
@@ -16,7 +16,7 @@ class DeviceUpdate(BaseModel):
     name_internal: str | None = Field(None, max_length=255)
     cpu: str | None = Field(None, max_length=255)
     gpu: str | None = Field(None, max_length=255)
-    ram: int | None = None
+    ram: int | str | None = None
     project_id: int | None = None
 
 class DeviceOut(DeviceBase):
@@ -25,6 +25,6 @@ class DeviceOut(DeviceBase):
     name_internal: str | None
     cpu: str | None
     gpu: str | None
-    ram: int | None
+    ram: str | None
 
     model_config = ConfigDict(from_attributes=True)

@@ -4,7 +4,7 @@ from .utils.service import BaseService
 
 class UserGroupService(BaseService):
     def get_user_group(self, group_id: int):
-        return self.db.query(UserGroups).filter(UserGroups.id == group_id).first()
+        return self.get_by_id(UserGroups, group_id)
 
     def get_user_group_by_name(self, name: str):
         return self.db.query(UserGroups).filter(UserGroups.name == name).first()
@@ -13,24 +13,16 @@ class UserGroupService(BaseService):
         return self.db.query(UserGroups).all()
 
     def create_user_group(self, group_data: dict):
-        group = UserGroups(**group_data)
-        self.db.add(group)
-        self.commit_and_refresh(group)
-        return group
+        return self.create(UserGroups, group_data)
 
     def update_user_group(self, group_id: int, group_data: dict):
         group = self.get_user_group(group_id)
         if not group:
             return None
-        for key, value in group_data.items():
-            setattr(group, key, value)
-        self.commit_and_refresh(group)
-        return group
+        return self.update(group, group_data)
 
     def delete_user_group(self, group_id: int):
         group = self.get_user_group(group_id)
         if not group:
             return None
-        self.db.delete(group)
-        self.db.commit()
-        return group
+        return self.delete(group)

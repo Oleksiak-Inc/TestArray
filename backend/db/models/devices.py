@@ -6,7 +6,7 @@ class Devices(Base):
     __tablename__ = "devices"
 
     id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("projects.id",use_alter=True), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     name_external = Column(String)
     name_internal = Column(String)
     cpu = Column(String)

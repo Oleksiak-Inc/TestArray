@@ -21,7 +21,9 @@ def create_test_case_version(
     current_user: Users = Depends(get_current_user),
 ):
     service = TestCaseVersionService(db)
-    test_case_version = service.create_test_case_version(test_case_version_in.model_dump())
+    data = test_case_version_in.model_dump(exclude_unset=True)
+    data.setdefault("created_by", current_user.id)
+    test_case_version = service.create_test_case_version(data)
     return test_case_version
 
 

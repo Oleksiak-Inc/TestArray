@@ -47,10 +47,21 @@ class Users(Base):
         foreign_keys="Attachments.uploaded_by", 
         back_populates="uploader")
     
+    edits = relationship(
+        "Attachments",
+        foreign_keys="Attachments.edited_by",
+        back_populates="editor"
+    )
+    
     executions = relationship(
         "Executions", 
         foreign_keys="Executions.executed_by", 
         back_populates="executor")
+    updated_executions = relationship(
+        "Executions",
+        foreign_keys="Executions.updated_by",
+        back_populates="updater"
+    )
     
     created_test_case_versions = relationship(
         "TestCaseVersions", 

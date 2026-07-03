@@ -53,7 +53,11 @@ def update_run(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user),
 ):
-    run = RunService(db).update_run(run_id, run_in.model_dump(exclude_unset=True))
+    try:
+        run = RunService(db).update_run(run_id, run_in.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     return run

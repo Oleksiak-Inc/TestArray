@@ -5,7 +5,7 @@ from .utils.service import BaseService
 
 class ScenarioService(BaseService):
     def get_scenario(self, scenario_id: int):
-        return self.db.query(Scenarios).filter(Scenarios.id == scenario_id).first()
+        return self.get_by_id(Scenarios, scenario_id)
 
     def get_scenario_by_name(self, name: str):
         return self.db.query(Scenarios).filter(Scenarios.name == name).first()
@@ -14,24 +14,16 @@ class ScenarioService(BaseService):
         return self.db.query(Scenarios).all()
 
     def create_scenario(self, scenario_data):
-        scenario = Scenarios(**scenario_data)
-        self.db.add(scenario)
-        self.commit_and_refresh(scenario)
-        return scenario
+        return self.create(Scenarios, scenario_data)
 
     def update_scenario(self, scenario_id: int, scenario_data):
         scenario = self.get_scenario(scenario_id)
         if not scenario:
             return None
-        for key, value in scenario_data.items():
-            setattr(scenario, key, value)
-        self.commit_and_refresh(scenario)
-        return scenario
+        return self.update(scenario, scenario_data)
 
     def delete_scenario(self, scenario_id: int):
         scenario = self.get_scenario(scenario_id)
         if not scenario:
             return None
-        self.db.delete(scenario)
-        self.db.commit()
-        return scenario
+        return self.delete(scenario)

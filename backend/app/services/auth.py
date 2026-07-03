@@ -25,8 +25,7 @@ class AuthService(BaseService):
 
         session_secret = SessionService(self.db).create_session(user.id, exp, now)
 
-        user.last_login_at = now
-        self.commit_and_refresh(user)
+        self.update(user, {"last_login_at": now})
 
         return {"user": user, "access_token": session_secret}
     
@@ -60,16 +59,16 @@ class AuthService(BaseService):
             return None
         
         hashed_password = hash_password(password)
-        new_user = Users(
-            first_name=first_name, 
-            last_name=last_name, 
-            email=email, 
-            password=hashed_password, 
-            user_type_id=regular_user_type.id
-            )
-        self.db.add(new_user)
-        self.commit_and_refresh(new_user)
-        return new_user
+        return self.create(
+            Users,
+            {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "password": hashed_password,
+                "user_type_id": regular_user_type.id,
+            },
+        )
 
     def logout_user(self, session_secret: str):
         session = SessionService(self.db).delete_session(session_secret)

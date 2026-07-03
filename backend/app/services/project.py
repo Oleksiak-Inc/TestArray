@@ -6,7 +6,7 @@ from .utils.service import BaseService
 class ProjectService(BaseService):
 
     def get_project(self, project_id: int):
-        return self.db.query(Projects).filter(Projects.id == project_id).first()
+        return self.get_by_id(Projects, project_id)
     
     def get_project_with_client(self, project_id: int):
         return self.db.query(Projects).filter(Projects.id == project_id).options(
@@ -14,16 +14,17 @@ class ProjectService(BaseService):
         ).first()
     
     def create_project(self, project_data):
-        project = Projects(**project_data)
-        self.db.add(project)
-        self.commit_and_refresh(project)
-        return project
+        return self.create(Projects, project_data)
     
     def update_project(self, project_id: int, project_data):
         project = self.get_project(project_id)
-        for key, value in project_data.items():
-            setattr(project, key, value)
-        self.commit_and_refresh(project)
-        return project
-    
+        if not project:
+            return None
+        return self.update(project, project_data)
+
+    def delete_project(self, project_id: int):
+        project = self.get_project(project_id)
+        if not project:
+            return None
+        return self.delete(project)
     

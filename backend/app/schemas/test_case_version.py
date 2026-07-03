@@ -14,7 +14,7 @@ class TestCaseVersionBase(BaseModel):
 
 
 class TestCaseVersionCreate(TestCaseVersionBase):
-    created_by: int
+    created_by: Optional[int] = None
 
 
 class TestCaseVersionUpdate(BaseModel):

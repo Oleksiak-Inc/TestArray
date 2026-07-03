@@ -11,10 +11,7 @@ from .utils.service import BaseService
 class SuitcaseService(BaseService):
 
     def create_suitcase(self, suitcase_data: dict) -> Suitcases:
-        suitcase = Suitcases(**suitcase_data)
-        self.db.add(suitcase)
-        self.commit_and_refresh(suitcase)
-        return suitcase
+        return self.create(Suitcases, suitcase_data)
 
     def create_suitcases_bulk(
         self,
@@ -39,14 +36,12 @@ class SuitcaseService(BaseService):
             if tc_id in existing_ids:
                 skipped.append(tc_id)
                 continue
-            suitcase = Suitcases(test_case_id=tc_id, test_suite_id=test_suite_id)
-            self.db.add(suitcase)
-            self.db.flush()   # gives us suitcase.id before commit
+            suitcase = self.add_and_flush(Suitcases(test_case_id=tc_id, test_suite_id=test_suite_id))
             created.append(suitcase)
  
-        self.db.commit()
+        self.commit()
         for s in created:
-            self.db.refresh(s)
+            self.refresh(s)
  
         return {"created": created, "skipped_duplicate_test_case_ids": skipped}
 
@@ -69,15 +64,10 @@ class SuitcaseService(BaseService):
         suitcase = self.get_suitcase(suitcase_id)
         if not suitcase:
             return None
-        for key, value in suitcase_data.items():
-            setattr(suitcase, key, value)
-        self.commit_and_refresh(suitcase)
-        return suitcase
+        return self.update(suitcase, suitcase_data)
 
     def delete_suitcase(self, suitcase_id: int):
         suitcase = self.get_suitcase(suitcase_id)
         if not suitcase:
             return None
-        self.db.delete(suitcase)
-        self.db.commit()
-        return suitcase
+        return self.delete(suitcase)

@@ -7,7 +7,7 @@ class Projects(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String)
-    client_id = Column(Integer, ForeignKey("clients.id",use_alter=True), nullable=False)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
 
     client = relationship("Clients", back_populates="projects", foreign_keys=[client_id])
     devices = relationship("Devices", back_populates="project", foreign_keys="Devices.project_id")

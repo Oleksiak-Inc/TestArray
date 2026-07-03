@@ -1,5 +1,7 @@
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,6 +19,18 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ["ENVIRONMENT"] = "test"
 load_dotenv(REPO_ROOT / ".env.test")
+
+UPLOAD_DIR = Path(tempfile.mkdtemp(prefix="testarray-uploads-"))
+os.environ["UPLOAD_DIR"] = str(UPLOAD_DIR)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_test_uploads():
+    """Remove temporary upload artifacts created during the test session."""
+    yield
+    if UPLOAD_DIR.exists():
+        shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
+
 
 from app import create_app
 from db.base import Base
@@ -93,6 +107,53 @@ def auth_client(client):
         },
     )
     assert register_resp.status_code == 200
+
+    login_resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login_resp.status_code == 200
+    client.cookies.update(login_resp.cookies)
+    return client
+
+
+@pytest.fixture
+def admin_client(client, db_session):
+    from app.api.utils.auth import hash_password
+    from db.models.user_types import UserTypes
+    from db.models.users import Users
+
+    admin_type = db_session.query(UserTypes).filter(UserTypes.name == "admin").first()
+    if not admin_type:
+        admin_type = UserTypes(name="admin", description="Admin user")
+        db_session.add(admin_type)
+        db_session.commit()
+        db_session.refresh(admin_type)
+
+    regular_type = db_session.query(UserTypes).filter(UserTypes.name == "regular").first()
+    if not regular_type:
+        regular_type = UserTypes(name="regular", description="Regular user")
+        db_session.add(regular_type)
+        db_session.commit()
+        db_session.refresh(regular_type)
+
+    email = f"admin-{uuid4().hex}@example.com"
+    password = "admin-password"
+
+    admin_user = Users(
+        first_name="Admin",
+        last_name="User",
+        email=email,
+        password=hash_password(password),
+        user_type_id=regular_type.id,
+    )
+    db_session.add(admin_user)
+    db_session.commit()
+    db_session.refresh(admin_user)
+
+    admin_user.user_type_id = admin_type.id
+    db_session.commit()
+    db_session.refresh(admin_user)
 
     login_resp = client.post(
         "/api/v1/auth/login",

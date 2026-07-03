@@ -9,7 +9,7 @@ from .utils.service import BaseService
 
 class TestSuiteService(BaseService):
     def get_test_suite(self, test_suite_id: int):
-        return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).first()
+        return self.get_by_id(TestSuites, test_suite_id)
     
     def get_test_suite_by_name(self, name: str):
         return self.db.query(TestSuites).filter(TestSuites.name == name).first()
@@ -44,19 +44,13 @@ class TestSuiteService(BaseService):
         )
 
     def create_test_suite(self, test_suite_data):
-        test_suite = TestSuites(**test_suite_data)
-        self.db.add(test_suite)
-        self.commit_and_refresh(test_suite)
-        return test_suite
+        return self.create(TestSuites, test_suite_data)
     
     def update_test_suite(self, test_suite_id, test_suite_data):
         test_suite = self.get_test_suite(test_suite_id)
         if not test_suite:
             return None
-        for key, value in test_suite_data.items():
-            setattr(test_suite, key, value)
-        self.commit_and_refresh(test_suite)
-        return test_suite
+        return self.update(test_suite, test_suite_data)
 
     def list_test_suites(self):
         return self.db.query(TestSuites).all()
@@ -65,6 +59,4 @@ class TestSuiteService(BaseService):
         test_suite = self.get_test_suite(test_suite_id)
         if not test_suite:
             return None
-        self.db.delete(test_suite)
-        self.db.commit()
-        return test_suite
+        return self.delete(test_suite)

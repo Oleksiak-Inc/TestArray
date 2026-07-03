@@ -12,7 +12,7 @@ class UserService(BaseService):
         return user
 
     def get_user_by_id(self, user_id: int):
-        return self.db.query(Users).filter(Users.id == user_id).first()
+        return self.get_by_id(Users, user_id)
     
     def list_users(self):
         return self.db.query(Users).all()
@@ -24,16 +24,11 @@ class UserService(BaseService):
 
         if "password" in user_data and user_data["password"] is not None:
             user_data["password"] = hash_password(user_data["password"])
-        for key, value in user_data.items():
-            setattr(user, key, value)
-        self.commit_and_refresh(user)
-        return user
+        return self.update(user, user_data)
 
     def delete_user(self, user_id: int) -> Users | None:
         user = self.get_user_by_id(user_id)
         if not user:
             return None
-        self.db.delete(user)
-        self.db.commit()
-        return user
+        return self.delete(user)
 

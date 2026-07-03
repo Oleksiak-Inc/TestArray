@@ -6,23 +6,22 @@ from datetime import datetime
 from core.config import settings
 from db.models.attachments import Attachments
 from fastapi import UploadFile
-import json
-from typing import Optional, Dict, Any
+from typing import List, Union
 
 def get_date_subdir() -> Path:
-    """Return the date-based subdirectory *relative to the upload root*."""
     now = datetime.now()
     return Path(str(now.year)) / f"{now.month:02}" / f"{now.day:02}"
 
 class AttachmentService(BaseService):
-    async def save_file(self, file: UploadFile, uploaded_by: int):
+    def get_attachment(self, attachment_id: int):
+        return self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
 
+    def list_attachments(self):
+        return self.db.query(Attachments).order_by(Attachments.uploaded_at.desc()).all()
+
+    async def save_file(self, file: UploadFile, uploaded_by: int, **kwargs) -> Union[Attachments, None]:
         ext = Path(file.filename).suffix
         if ext not in settings.ALLOWED_FILE_EXTENSIONS:
-            return None
-
-        contents = await file.read()
-        if len(contents) > settings.MAX_FILE_SIZE:
             return None
 
         date_dir = get_date_subdir()
@@ -32,18 +31,82 @@ class AttachmentService(BaseService):
         stored_name = f"{uuid4()}{ext}"
         dest = full_dir / stored_name
 
+        total_bytes = 0
         try:
             async with aiofiles.open(dest, "wb") as f:
-                await f.write(contents)
+                while chunk := await file.read(settings.CHUNK_SIZE):
+                    total_bytes += len(chunk)
+                    if total_bytes > settings.MAX_FILE_SIZE:
+                        await f.close()
+                        dest.unlink(missing_ok=True)
+                        return None
+                    await f.write(chunk)
         except Exception:
+            if dest.exists():
+                dest.unlink(missing_ok=True)
             return None
 
         attachment = Attachments(
             filename=file.filename,
             relative_path=str(date_dir / stored_name),
-            uploaded_by=uploaded_by
+            uploaded_by=uploaded_by,
+            uploaded_at=datetime.now(),
+            **kwargs
         )
-        self.db.add(attachment)
-        self.commit_and_refresh(attachment)
-        return attachment
-    
+        return self.save(attachment)
+
+    async def delete_file(self, attachment_id: int) -> Union[Attachments, None]:
+        attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
+        if not attachment:
+            return None
+
+        file_path = Path(settings.UPLOAD_DIR) / attachment.relative_path
+        if file_path.exists():
+            file_path.unlink()
+        return self.delete(attachment)
+
+    async def bulk_save_files(self, files: List[UploadFile], uploaded_by: int) -> List[dict]:
+        results = []
+        for file in files:
+            attachment = await self.save_file(file, uploaded_by)
+            status = "fail"
+            if attachment:
+                status = "success"
+                
+            results.append({"attachment": attachment, "status": status})
+        return results
+
+    async def replace_file(self, attachment_id: int, edited_by: int, new_file: UploadFile) -> Union[Attachments, None]:
+        attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
+        if not attachment:
+            return None
+
+        # Delete the old file
+        old_file_path = Path(settings.UPLOAD_DIR) / attachment.relative_path
+        if old_file_path.exists():
+            old_file_path.unlink()
+
+        # Save the new file
+        new_attachment = await self.save_file(new_file, attachment.uploaded_by)
+        if not new_attachment:
+            return None
+
+        # Update the database record
+        attachment.filename = new_attachment.filename
+        attachment.relative_path = new_attachment.relative_path
+        attachment.edited_by = edited_by
+        attachment.edited_at = datetime.now()
+        return self.commit_and_refresh(attachment)
+
+    async def update_file_metadata(self, attachment_id: int, edited_by: int, **kwargs) -> Union[Attachments, None]:
+        attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
+        if not attachment:
+            return None
+
+        # Update the metadata fields provided in kwargs
+        for key, value in kwargs.items():
+            setattr(attachment, key, value)
+
+        attachment.edited_by = edited_by
+        attachment.edited_at = datetime.now()
+        return self.commit_and_refresh(attachment)

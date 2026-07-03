@@ -175,6 +175,11 @@ class Users(Base):
         "Attachments", 
         foreign_keys="Attachments.uploaded_by", 
         back_populates="uploader")
+    edits = relationship(
+        "Attachments",
+        foreign_keys="Attachments.edited_by",
+        back_populates="editor"
+    )
     executions = relationship(
         "Executions", 
         foreign_keys="Executions.executed_by", 
@@ -207,19 +212,19 @@ class TestSuites(Base):
     )
 
 # File: ./backend/db/models/executions.py
-from sqlalchemy import Column, Index, Integer, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Index, Integer, Text, DateTime, ForeignKey
 from db.base import Base
 from sqlalchemy.orm import relationship
 class Executions(Base):
     __tablename__ = "executions"
     id = Column(Integer, primary_key=True)
-    device_id = Column(Integer, ForeignKey("devices.id",use_alter=True), nullable=False)
-    run_id = Column(Integer, ForeignKey("runs.id",use_alter=True), nullable=False)
-    test_case_version_id = Column(Integer, ForeignKey("test_case_versions.id",use_alter=True), nullable=False)
-    executed_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
-    status_id = Column(Integer, ForeignKey("statuses.id",use_alter=True), nullable=False)
-    attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
-    resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
+    device_id = Column(Integer, ForeignKey("devices.id"), nullable=False)
+    run_id = Column(Integer, ForeignKey("runs.id"), nullable=False)
+    test_case_version_id = Column(Integer, ForeignKey("test_case_versions.id"), nullable=False)
+    executed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    status_id = Column(Integer, ForeignKey("statuses.id"), nullable=True)
+    attachment_id = Column(Integer, ForeignKey("attachments.id"), nullable=True)
+    resolution_id = Column(Integer, ForeignKey("resolutions.id"), nullable=True)
     actual_result = Column(Text)
     executed_at = Column(DateTime(timezone=True))
     execution_order = Column(Integer, nullable=False)
@@ -229,13 +234,8 @@ class Executions(Base):
     executor = relationship("Users", foreign_keys=[executed_by], back_populates="executions")
     status = relationship("Statuses", back_populates="executions", foreign_keys=[status_id])
     attachment = relationship("Attachments", back_populates="executions", foreign_keys=[attachment_id])
-    resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
+    resolution = relationship("Resolutions", back_populates="executions", foreign_keys=[resolution_id])
     __table_args__ = (
-        UniqueConstraint(
-            "run_id",
-            "test_case_version_id",
-            name="execution_run_version_unique"
-        ),
         Index("execution_status_idx", "status_id"),
         Index("execution_executor_idx", "executed_by"),
         Index("execution_device_idx", "device_id"),
@@ -280,7 +280,7 @@ from sqlalchemy.orm import relationship
 class Sessions(Base):
     __tablename__ = "sessions"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     token = Column(String, nullable=False, unique=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False)
@@ -339,7 +339,7 @@ class Projects(Base):
     __tablename__ = "projects"
     id = Column(Integer, primary_key=True)
     name = Column(String)
-    client_id = Column(Integer, ForeignKey("clients.id",use_alter=True), nullable=False)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
     client = relationship("Clients", back_populates="projects", foreign_keys=[client_id])
     devices = relationship("Devices", back_populates="project", foreign_keys="Devices.project_id")
     runs = relationship("Runs", back_populates="project", foreign_keys="Runs.project_id")
@@ -381,7 +381,7 @@ from sqlalchemy.orm import relationship
 class Devices(Base):
     __tablename__ = "devices"
     id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("projects.id",use_alter=True), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     name_external = Column(String)
     name_internal = Column(String)
     cpu = Column(String)
@@ -401,12 +401,14 @@ from db.base import Base
 class Attachments(Base):
     __tablename__ = "attachments"
     id = Column(Integer, primary_key=True)
-    parent_attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
-    uploaded_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
-    #resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
+    parent_attachment_id = Column(Integer, ForeignKey("attachments.id"), nullable=True)
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    #resolution_id = Column(Integer, ForeignKey("resolutions.id"), nullable=True)
+    edited_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     filename = Column(String)
     relative_path = Column(String)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    edited_at = Column(DateTime(timezone=True), onupdate=func.now())
     #presentmon_version = Column(String)
     #settings = Column(JSON)
     parent = relationship(
@@ -415,13 +417,16 @@ class Attachments(Base):
         backref="children"
     )
     uploader = relationship("Users", back_populates="uploads", foreign_keys=[uploaded_by])
+    editor = relationship("Users", back_populates="edits", foreign_keys=[edited_by])
     #resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
     executions = relationship("Executions", back_populates="attachment", foreign_keys="Executions.attachment_id")
     __table_args__ = (
         Index("attachment_parent_idx", "parent_attachment_id"),
         Index("attachment_uploaded_by_idx", "uploaded_by"),
+        Index("attachment_edited_by_idx", "edited_by"),
         Index("attachment_filename_idx", "filename"),
         Index("attachment_uploaded_at_idx", "uploaded_at"),
+        Index("attachment_edited_at_idx", "edited_at"),
         #Index("attachment_resolution_idx", "resolution_id"),
     )
 
@@ -613,8 +618,7 @@ class AuthService(BaseService):
         now = datetime.now(timezone.utc)
         exp = now + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
         session_secret = SessionService(self.db).create_session(user.id, exp, now)
-        user.last_login_at = now
-        self.commit_and_refresh(user)
+        self.update(user, {"last_login_at": now})
         return {"user": user, "access_token": session_secret}
     def validate_session(self, session_secret: str):
         session = SessionService(self.db).get_session(session_secret=session_secret)
@@ -638,16 +642,16 @@ class AuthService(BaseService):
         if not regular_user_type:
             return None
         hashed_password = hash_password(password)
-        new_user = Users(
-            first_name=first_name, 
-            last_name=last_name, 
-            email=email, 
-            password=hashed_password, 
-            user_type_id=regular_user_type.id
-            )
-        self.db.add(new_user)
-        self.commit_and_refresh(new_user)
-        return new_user
+        return self.create(
+            Users,
+            {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "password": hashed_password,
+                "user_type_id": regular_user_type.id,
+            },
+        )
     def logout_user(self, session_secret: str):
         session = SessionService(self.db).delete_session(session_secret)
         if not session:
@@ -655,7 +659,112 @@ class AuthService(BaseService):
         return True
 
 # File: ./backend/app/services/execution.py
-
+from datetime import datetime, timezone
+from typing import Any
+from sqlalchemy.orm import joinedload
+from db.models.attachments import Attachments
+from db.models.devices import Devices
+from db.models.executions import Executions
+from db.models.runs import Runs
+from db.models.statuses import Statuses
+from db.models.suitcases import Suitcases
+from db.models.test_case_versions import TestCaseVersions
+from db.models.test_suites import TestSuites
+from app.services.test_case_version import TestCaseVersionService
+from .utils.service import BaseService
+class ExecutionService(BaseService):
+    def get_execution(self, execution_id: int):
+        return self.get_by_id(Executions, execution_id)
+    def list_executions(self):
+        return self.db.query(Executions).all()
+    def list_executions_by_run(self, run_id: int):
+        return self.db.query(Executions).filter(Executions.run_id == run_id).all()
+    def _get_latest_test_case_version(self, test_case_id: int):
+        return TestCaseVersionService(self.db).get_latest_test_case_version_by_test_case_id(test_case_id)
+    def create_executions_for_test_suite(self, *, test_suite_id: int, run_id: int, device_ids: list[int]):
+        test_suite = self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).first()
+        if not test_suite:
+            raise ValueError("Test suite not found")
+        run = self.db.query(Runs).filter(Runs.id == run_id).first()
+        if not run:
+            raise ValueError("Run not found")
+        devices = self.db.query(Devices).filter(Devices.id.in_(device_ids)).all()
+        if len(devices) != len(set(device_ids)):
+            raise ValueError("One or more devices were not found")
+        for device in devices:
+            if device.project_id != run.project_id:
+                raise ValueError("Device does not belong to the selected run project")
+        suitcases = (
+            self.db.query(Suitcases)
+            .filter(Suitcases.test_suite_id == test_suite_id)
+            .order_by(Suitcases.id)
+            .all()
+        )
+        if not suitcases:
+            raise ValueError("The selected test suite has no test cases")
+        created: list[Executions] = []
+        execution_order = 1
+        for suitcase in suitcases:
+            version = self._get_latest_test_case_version(suitcase.test_case_id)
+            if not version:
+                raise ValueError(f"Test case {suitcase.test_case_id} has no version available")
+            for device in devices:
+                existing = self.get_one(
+                    Executions,
+                    run_id=run_id,
+                    device_id=device.id,
+                    test_case_version_id=version.id,
+                )
+                if existing:
+                    continue
+                execution = Executions(
+                    device_id=device.id,
+                    run_id=run_id,
+                    test_case_version_id=version.id,
+                    executed_by=None,
+                    status_id=None,
+                    attachment_id=None,
+                    resolution_id=None,
+                    actual_result=None,
+                    executed_at=None,
+                    execution_order=execution_order,
+                )
+                self.add(execution)
+                created.append(execution)
+                execution_order += 1
+        self.commit()
+        return created
+    def update_execution(self, execution_id: int, execution_data: dict[str, Any], current_user: Any):
+        execution = self.db.query(Executions).filter(Executions.id == execution_id).first()
+        if not execution:
+            return None
+        test_case_version = TestCaseVersionService(self.db).get_test_case_version_with_test_case(
+            execution.test_case_version_id
+        )
+        update_payload = dict(execution_data)
+        update_payload.pop("executed_by", None)
+        update_payload.pop("executed_at", None)
+        if "status_id" in update_payload and update_payload["status_id"] is not None:
+            allowed_status_ids = {
+                status.id
+                for status in self.db.query(Statuses).filter(
+                    Statuses.status_set_id == test_case_version.test_case.status_set_id
+                ).all()
+            }
+            if update_payload["status_id"] not in allowed_status_ids:
+                raise ValueError("Status is not allowed for this execution")
+            update_payload["executed_by"] = getattr(current_user, "id", current_user)
+            update_payload["executed_at"] = datetime.now(timezone.utc)
+        if "attachment_id" in update_payload and update_payload["attachment_id"] is not None:
+            attachment = self.db.query(Attachments).filter(Attachments.id == update_payload["attachment_id"]).first()
+            if not attachment:
+                raise ValueError("Attachment not found")
+        return self.update(execution, update_payload)
+    def delete_execution(self, execution_id: int):
+        execution = self.get_execution(execution_id)
+        if not execution:
+            return None
+        return self.delete(execution)
 
 # File: ./backend/app/services/test_case_version.py
 from db.models.test_suites import TestSuites
@@ -666,7 +775,7 @@ from sqlalchemy.orm import Session, joinedload
 from .utils.service import BaseService
 class TestCaseVersionService(BaseService):
     def get_test_case_version(self, test_case_version_id: int):
-        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).first()
+        return self.get_by_id(TestCaseVersions, test_case_version_id)
     def get_test_case_version_with_test_case(self, test_case_version_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
             joinedload(TestCaseVersions.test_case)
@@ -682,28 +791,30 @@ class TestCaseVersionService(BaseService):
             TestCaseVersions.test_case_id == test_case_id,
             TestCaseVersions.release_ready == True
         ).order_by(TestCaseVersions.created_at.desc()).first()
+    def get_latest_test_case_version_by_test_case_id(self, test_case_id: int):
+        version = self.get_latest_release_ready_test_case_version_by_test_case_id(test_case_id)
+        if version:
+            return version
+        return (
+            self.db.query(TestCaseVersions)
+            .filter(TestCaseVersions.test_case_id == test_case_id)
+            .order_by(TestCaseVersions.created_at.desc(), TestCaseVersions.version.desc())
+            .first()
+        )
     def create_test_case_version(self, test_case_version_data):
-        test_case_version = TestCaseVersions(**test_case_version_data)
-        self.db.add(test_case_version)
-        self.commit_and_refresh(test_case_version)
-        return test_case_version
+        return self.create(TestCaseVersions, test_case_version_data)
     def list_test_case_versions_by_test_case(self, test_case_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id).all()
     def update_test_case_version(self, test_case_version_id: int, test_case_version_data):
         test_case_version = self.get_test_case_version(test_case_version_id)
         if not test_case_version:
             return None
-        for key, value in test_case_version_data.items():
-            setattr(test_case_version, key, value)
-        self.commit_and_refresh(test_case_version)
-        return test_case_version
+        return self.update(test_case_version, test_case_version_data)
     def delete_test_case_version(self, test_case_version_id: int):
         test_case_version = self.get_test_case_version(test_case_version_id)
         if not test_case_version:
             return None
-        self.db.delete(test_case_version)
-        self.db.commit()
-        return test_case_version
+        return self.delete(test_case_version)
 
 # File: ./backend/app/services/users.py
 from db.models.users import Users
@@ -717,7 +828,7 @@ class UserService(BaseService):
             return None
         return user
     def get_user_by_id(self, user_id: int):
-        return self.db.query(Users).filter(Users.id == user_id).first()
+        return self.get_by_id(Users, user_id)
     def list_users(self):
         return self.db.query(Users).all()
     def update_user(self, user_id: int, user_data: dict) -> Users | None:
@@ -726,24 +837,19 @@ class UserService(BaseService):
             return None
         if "password" in user_data and user_data["password"] is not None:
             user_data["password"] = hash_password(user_data["password"])
-        for key, value in user_data.items():
-            setattr(user, key, value)
-        self.commit_and_refresh(user)
-        return user
+        return self.update(user, user_data)
     def delete_user(self, user_id: int) -> Users | None:
         user = self.get_user_by_id(user_id)
         if not user:
             return None
-        self.db.delete(user)
-        self.db.commit()
-        return user
+        return self.delete(user)
 
 # File: ./backend/app/services/resolution.py
 from db.models.resolutions import Resolutions
 from .utils.service import BaseService
 class ResolutionService(BaseService):
     def get_resolution(self, resolution_id: int):
-        return self.db.query(Resolutions).filter(Resolutions.id == resolution_id).first()
+        return self.get_by_id(Resolutions, resolution_id)
     def get_resolution_by_hw(self, h: int, w: int):
         return self.db.query(Resolutions).filter(
             Resolutions.h == h, Resolutions.w == w
@@ -751,25 +857,17 @@ class ResolutionService(BaseService):
     def list_resolutions(self):
         return self.db.query(Resolutions).all()
     def create_resolution(self, resolution_data: dict):
-        resolution = Resolutions(**resolution_data)
-        self.db.add(resolution)
-        self.commit_and_refresh(resolution)
-        return resolution
+        return self.create(Resolutions, resolution_data)
     def update_resolution(self, resolution_id: int, resolution_data: dict):
         resolution = self.get_resolution(resolution_id)
         if not resolution:
             return None
-        for key, value in resolution_data.items():
-            setattr(resolution, key, value)
-        self.commit_and_refresh(resolution)
-        return resolution
+        return self.update(resolution, resolution_data)
     def delete_resolution(self, resolution_id: int):
         resolution = self.get_resolution(resolution_id)
         if not resolution:
             return None
-        self.db.delete(resolution)
-        self.db.commit()
-        return resolution
+        return self.delete(resolution)
 
 # File: ./backend/app/services/test_case.py
 from sqlalchemy import text
@@ -781,11 +879,7 @@ from app.services.suitcase import SuitcaseService
 from .utils.service import BaseService
 class TestCaseService(BaseService):
     def get_test_case(self, test_case_id: int):
-        return (
-            self.db.query(TestCases)
-            .filter(TestCases.id == test_case_id)
-            .first()
-        )
+        return self.get_by_id(TestCases, test_case_id)
     def get_test_case_with_testsuites(self, test_case_id: int):
         return (
             self.db.query(TestCases)
@@ -825,28 +919,16 @@ class TestCaseService(BaseService):
             .first()
         )
     def create_test_case(self, test_case_data):
-        test_case = TestCases(**test_case_data)
-        self.db.add(test_case)
-        self.commit_and_refresh(test_case)
-        return test_case
+        return self.create(TestCases, test_case_data)
     def create_test_case_and_version(self, test_case_data, test_case_version_data, test_suite_id: int = None):
-        test_case = TestCases(**test_case_data)
-        self.db.add(test_case)
-        self.db.flush()  # Get ID without committing
+        test_case = self.add_and_flush(TestCases(**test_case_data))
         test_case_version_data["test_case_id"] = test_case.id
-        test_case_version = TestCaseVersions(**test_case_version_data)
-        self.db.add(test_case_version)
-        self.db.flush()
+        test_case_version = self.add_and_flush(TestCaseVersions(**test_case_version_data))
         if test_suite_id:
-            suitcase_data = {
-                "test_case_id": test_case.id,
-                "test_suite_id": test_suite_id
-            }
-            suitcase = Suitcases(**suitcase_data)
-            self.db.add(suitcase)
-        self.db.commit()
-        self.db.refresh(test_case)
-        self.db.refresh(test_case_version)
+            self.add_and_flush(Suitcases(test_case_id=test_case.id, test_suite_id=test_suite_id))
+        self.commit()
+        self.refresh(test_case)
+        self.refresh(test_case_version)
         return test_case, test_case_version
     def create_test_cases_and_versions_bulk(
         self,
@@ -861,19 +943,15 @@ class TestCaseService(BaseService):
             # Split the flat dict into its two parts
             tc_data = {k: v for k, v in item.items() if k in TEST_CASE_FIELDS}
             tcv_data = {k: v for k, v in item.items() if k in VERSION_FIELDS}
-            test_case = TestCases(**tc_data)
-            self.db.add(test_case)
-            self.db.flush()  # gives us test_case.id without committing yet
+            test_case = self.add_and_flush(TestCases(**tc_data))
             tcv_data.update({
                 "test_case_id": test_case.id,
                 "created_by": created_by,
                 "version": 1,
             })
-            test_case_version = TestCaseVersions(**tcv_data)
-            self.db.add(test_case_version)
-            self.db.flush()
+            test_case_version = self.add_and_flush(TestCaseVersions(**tcv_data))
             if test_suite_id:
-                self.db.add(Suitcases(
+                self.add_and_flush(Suitcases(
                     test_case_id=test_case.id,
                     test_suite_id=test_suite_id,
                 ))
@@ -882,8 +960,7 @@ class TestCaseService(BaseService):
                 "test_case_version_id": test_case_version.id,
                 "version": test_case_version.version,
             })
-        # Single commit for the whole batch — all or nothing
-        self.db.commit()
+        self.commit()
         return results
     def list_test_cases(self):
         return self.db.query(TestCases).all()
@@ -891,17 +968,12 @@ class TestCaseService(BaseService):
         test_case = self.get_test_case(test_case_id)
         if not test_case:
             return None
-        for key, value in test_case_data.items():
-            setattr(test_case, key, value)
-        self.commit_and_refresh(test_case)
-        return test_case
+        return self.update(test_case, test_case_data)
     def delete_test_case(self, test_case_id: int):
         test_case = self.get_test_case(test_case_id)
         if not test_case:
             return None
-        self.db.delete(test_case)
-        self.db.commit()
-        return test_case
+        return self.delete(test_case)
 
 # File: ./backend/app/services/client.py
 from sqlalchemy.orm import Session, joinedload
@@ -910,24 +982,18 @@ from db.models.projects import Projects
 from .utils.service import BaseService
 class ClientService(BaseService):
     def get_client(self, client_id: int):
-        return self.db.query(Clients).filter(Clients.id == client_id).first()
+        return self.get_by_id(Clients, client_id)
     def get_client_with_projects(self, client_id: int):
         return self.db.query(Clients).filter(Clients.id == client_id).options(
             joinedload(Clients.projects)
         ).first()
     def create_client(self, client_data):
-        client = Clients(**client_data)
-        self.db.add(client)
-        self.commit_and_refresh(client)
-        return client
+        return self.create(Clients, client_data)
     def update_client(self, client_id: int, client_data):
         client = self.get_client(client_id)
         if not client:
             return None
-        for key, value in client_data.items():
-            setattr(client, key, value)
-        self.commit_and_refresh(client)
-        return client
+        return self.update(client, client_data)
 
 # File: ./backend/app/services/project.py
 from sqlalchemy.orm import Session, joinedload
@@ -936,22 +1002,18 @@ from db.models.projects import Projects
 from .utils.service import BaseService
 class ProjectService(BaseService):
     def get_project(self, project_id: int):
-        return self.db.query(Projects).filter(Projects.id == project_id).first()
+        return self.get_by_id(Projects, project_id)
     def get_project_with_client(self, project_id: int):
         return self.db.query(Projects).filter(Projects.id == project_id).options(
             joinedload(Projects.client)
         ).first()
     def create_project(self, project_data):
-        project = Projects(**project_data)
-        self.db.add(project)
-        self.commit_and_refresh(project)
-        return project
+        return self.create(Projects, project_data)
     def update_project(self, project_id: int, project_data):
         project = self.get_project(project_id)
-        for key, value in project_data.items():
-            setattr(project, key, value)
-        self.commit_and_refresh(project)
-        return project
+        if not project:
+            return None
+        return self.update(project, project_data)
 
 # File: ./backend/app/services/scenario.py
 from db.models.scenarios import Scenarios
@@ -959,31 +1021,23 @@ from sqlalchemy.orm import Session
 from .utils.service import BaseService
 class ScenarioService(BaseService):
     def get_scenario(self, scenario_id: int):
-        return self.db.query(Scenarios).filter(Scenarios.id == scenario_id).first()
+        return self.get_by_id(Scenarios, scenario_id)
     def get_scenario_by_name(self, name: str):
         return self.db.query(Scenarios).filter(Scenarios.name == name).first()
     def list_scenarios(self):
         return self.db.query(Scenarios).all()
     def create_scenario(self, scenario_data):
-        scenario = Scenarios(**scenario_data)
-        self.db.add(scenario)
-        self.commit_and_refresh(scenario)
-        return scenario
+        return self.create(Scenarios, scenario_data)
     def update_scenario(self, scenario_id: int, scenario_data):
         scenario = self.get_scenario(scenario_id)
         if not scenario:
             return None
-        for key, value in scenario_data.items():
-            setattr(scenario, key, value)
-        self.commit_and_refresh(scenario)
-        return scenario
+        return self.update(scenario, scenario_data)
     def delete_scenario(self, scenario_id: int):
         scenario = self.get_scenario(scenario_id)
         if not scenario:
             return None
-        self.db.delete(scenario)
-        self.db.commit()
-        return scenario
+        return self.delete(scenario)
 
 # File: ./backend/app/services/user_type.py
 from db.models.user_types import UserTypes
@@ -991,22 +1045,16 @@ from sqlalchemy.orm import Session
 from .utils.service import BaseService
 class UserTypeService(BaseService):
     def get_user_type_by_id(self, user_type_id: int):
-        return self.db.query(UserTypes).filter(UserTypes.id == user_type_id).first()
+        return self.get_by_id(UserTypes, user_type_id)
     def get_user_type_by_name(self, name: str):
         return self.db.query(UserTypes).filter(UserTypes.name == name).first()
     def create_user_type(self, user_type_data):
-        user_type = UserTypes(**user_type_data)
-        self.db.add(user_type)
-        self.commit_and_refresh(user_type)
-        return user_type
+        return self.create(UserTypes, user_type_data)
     def update_user_type(self, user_type_id, user_type_data):
         user_type = self.get_user_type_by_id(user_type_id)
         if not user_type:
             return None
-        for key, value in user_type_data.items():
-            setattr(user_type, key, value)
-        self.commit_and_refresh(user_type)
-        return user_type
+        return self.update(user_type, user_type_data)
 
 # File: ./backend/app/services/test_suite.py
 from db.models.test_suites import TestSuites
@@ -1018,7 +1066,7 @@ from sqlalchemy import select, text
 from .utils.service import BaseService
 class TestSuiteService(BaseService):
     def get_test_suite(self, test_suite_id: int):
-        return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).first()
+        return self.get_by_id(TestSuites, test_suite_id)
     def get_test_suite_by_name(self, name: str):
         return self.db.query(TestSuites).filter(TestSuites.name == name).first()
     def get_test_suite_with_test_cases(self, test_suite_id: int):
@@ -1048,27 +1096,19 @@ class TestSuiteService(BaseService):
             ).fetchall()
         )
     def create_test_suite(self, test_suite_data):
-        test_suite = TestSuites(**test_suite_data)
-        self.db.add(test_suite)
-        self.commit_and_refresh(test_suite)
-        return test_suite
+        return self.create(TestSuites, test_suite_data)
     def update_test_suite(self, test_suite_id, test_suite_data):
         test_suite = self.get_test_suite(test_suite_id)
         if not test_suite:
             return None
-        for key, value in test_suite_data.items():
-            setattr(test_suite, key, value)
-        self.commit_and_refresh(test_suite)
-        return test_suite
+        return self.update(test_suite, test_suite_data)
     def list_test_suites(self):
         return self.db.query(TestSuites).all()
     def delete_test_suite(self, test_suite_id):
         test_suite = self.get_test_suite(test_suite_id)
         if not test_suite:
             return None
-        self.db.delete(test_suite)
-        self.db.commit()
-        return test_suite
+        return self.delete(test_suite)
 
 # File: ./backend/app/services/run.py
 from sqlalchemy.orm import Session, joinedload
@@ -1078,7 +1118,7 @@ from db.models.runs import Runs
 from .utils.service import BaseService
 class RunService(BaseService):
     def get_run(self, run_id):
-        return self.db.query(Runs).filter(Runs.id == run_id).first()
+        return self.get_by_id(Runs, run_id)
     def get_run_with_project(self, run_id):
         return self.db.query(Runs).filter(Runs.id == run_id).options(
             joinedload(Runs.project)
@@ -1090,25 +1130,17 @@ class RunService(BaseService):
     def list_runs_by_project(self, project_id):
         return self.db.query(Runs).filter(Runs.project_id == project_id).all()
     def create_run(self, run_data):
-        run = Runs(**run_data)
-        self.db.add(run)
-        self.commit_and_refresh(run)
-        return run
+        return self.create(Runs, run_data)
     def update_run(self, run_id, run_data):
         run = self.get_run(run_id)
         if not run:
             return None
-        for key, value in run_data.items():
-            setattr(run, key, value)
-        self.commit_and_refresh(run)
-        return run
+        return self.update(run, run_data)
     def delete_run(self, run_id):
         run = self.get_run(run_id)
         if not run:
             return None
-        self.db.delete(run)
-        self.db.commit()
-        return run
+        return self.delete(run)
 
 # File: ./backend/app/services/suitcase.py
 from sqlalchemy import text
@@ -1119,10 +1151,7 @@ from db.models.test_case_versions import TestCaseVersions
 from .utils.service import BaseService
 class SuitcaseService(BaseService):
     def create_suitcase(self, suitcase_data: dict) -> Suitcases:
-        suitcase = Suitcases(**suitcase_data)
-        self.db.add(suitcase)
-        self.commit_and_refresh(suitcase)
-        return suitcase
+        return self.create(Suitcases, suitcase_data)
     def create_suitcases_bulk(
         self,
         test_suite_id: int,
@@ -1144,13 +1173,11 @@ class SuitcaseService(BaseService):
             if tc_id in existing_ids:
                 skipped.append(tc_id)
                 continue
-            suitcase = Suitcases(test_case_id=tc_id, test_suite_id=test_suite_id)
-            self.db.add(suitcase)
-            self.db.flush()   # gives us suitcase.id before commit
+            suitcase = self.add_and_flush(Suitcases(test_case_id=tc_id, test_suite_id=test_suite_id))
             created.append(suitcase)
-        self.db.commit()
+        self.commit()
         for s in created:
-            self.db.refresh(s)
+            self.refresh(s)
         return {"created": created, "skipped_duplicate_test_case_ids": skipped}
     def get_suitcase(self, suitcase_id: int):
         return self.db.query(Suitcases).filter(Suitcases.id == suitcase_id).first()
@@ -1167,24 +1194,19 @@ class SuitcaseService(BaseService):
         suitcase = self.get_suitcase(suitcase_id)
         if not suitcase:
             return None
-        for key, value in suitcase_data.items():
-            setattr(suitcase, key, value)
-        self.commit_and_refresh(suitcase)
-        return suitcase
+        return self.update(suitcase, suitcase_data)
     def delete_suitcase(self, suitcase_id: int):
         suitcase = self.get_suitcase(suitcase_id)
         if not suitcase:
             return None
-        self.db.delete(suitcase)
-        self.db.commit()
-        return suitcase
+        return self.delete(suitcase)
 
 # File: ./backend/app/services/status.py
 from db.models.statuses import Statuses
 from .utils.service import BaseService
 class StatusService(BaseService):
     def get_status(self, status_id: int):
-        return self.db.query(Statuses).filter(Statuses.id == status_id).first()
+        return self.get_by_id(Statuses, status_id)
     def list_statuses_by_status_set(self, status_set_id: int):
         return self.db.query(Statuses).filter(
             Statuses.status_set_id == status_set_id
@@ -1192,25 +1214,17 @@ class StatusService(BaseService):
     def list_all_statuses(self):
         return self.db.query(Statuses).all()
     def create_status(self, status_data: dict):
-        status = Statuses(**status_data)
-        self.db.add(status)
-        self.commit_and_refresh(status)
-        return status
+        return self.create(Statuses, status_data)
     def update_status(self, status_id: int, status_data: dict):
         status = self.get_status(status_id)
         if not status:
             return None
-        for key, value in status_data.items():
-            setattr(status, key, value)
-        self.commit_and_refresh(status)
-        return status
+        return self.update(status, status_data)
     def delete_status(self, status_id: int):
         status = self.get_status(status_id)
         if not status:
             return None
-        self.db.delete(status)
-        self.db.commit()
-        return status
+        return self.delete(status)
 
 # File: ./backend/app/services/attachment.py
 from .utils.service import BaseService
@@ -1221,38 +1235,87 @@ from datetime import datetime
 from core.config import settings
 from db.models.attachments import Attachments
 from fastapi import UploadFile
-import json
-from typing import Optional, Dict, Any
+from typing import List, Union
 def get_date_subdir() -> Path:
-    """Return the date-based subdirectory *relative to the upload root*."""
     now = datetime.now()
     return Path(str(now.year)) / f"{now.month:02}" / f"{now.day:02}"
 class AttachmentService(BaseService):
-    async def save_file(self, file: UploadFile, uploaded_by: int):
+    async def save_file(self, file: UploadFile, uploaded_by: int, **kwargs) -> Union[Attachments, None]:
         ext = Path(file.filename).suffix
         if ext not in settings.ALLOWED_FILE_EXTENSIONS:
-            return None
-        contents = await file.read()
-        if len(contents) > settings.MAX_FILE_SIZE:
             return None
         date_dir = get_date_subdir()
         full_dir = Path(settings.UPLOAD_DIR) / date_dir
         full_dir.mkdir(parents=True, exist_ok=True)
         stored_name = f"{uuid4()}{ext}"
         dest = full_dir / stored_name
+        total_bytes = 0
         try:
             async with aiofiles.open(dest, "wb") as f:
-                await f.write(contents)
+                while chunk := await file.read(settings.CHUNK_SIZE):
+                    total_bytes += len(chunk)
+                    if total_bytes > settings.MAX_FILE_SIZE:
+                        await f.close()
+                        dest.unlink(missing_ok=True)
+                        return None
+                    await f.write(chunk)
         except Exception:
+            if dest.exists():
+                dest.unlink(missing_ok=True)
             return None
         attachment = Attachments(
             filename=file.filename,
             relative_path=str(date_dir / stored_name),
-            uploaded_by=uploaded_by
+            uploaded_by=uploaded_by,
+            uploaded_at=datetime.now(),
+            **kwargs
         )
-        self.db.add(attachment)
-        self.commit_and_refresh(attachment)
-        return attachment
+        return self.save(attachment)
+    async def delete_file(self, attachment_id: int) -> Union[Attachments, None]:
+        attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
+        if not attachment:
+            return None
+        file_path = Path(settings.UPLOAD_DIR) / attachment.relative_path
+        if file_path.exists():
+            file_path.unlink()
+        return self.delete(attachment)
+    async def bulk_save_files(self, files: List[UploadFile], uploaded_by: int) -> List[dict]:
+        results = []
+        for file in files:
+            attachment = await self.save_file(file, uploaded_by)
+            status = "fail"
+            if attachment:
+                status = "success"
+            results.append({"attachment": attachment, "status": status})
+        return results
+    async def replace_file(self, attachment_id: int, edited_by: int, new_file: UploadFile) -> Union[Attachments, None]:
+        attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
+        if not attachment:
+            return None
+        # Delete the old file
+        old_file_path = Path(settings.UPLOAD_DIR) / attachment.relative_path
+        if old_file_path.exists():
+            old_file_path.unlink()
+        # Save the new file
+        new_attachment = await self.save_file(new_file, attachment.uploaded_by)
+        if not new_attachment:
+            return None
+        # Update the database record
+        attachment.filename = new_attachment.filename
+        attachment.relative_path = new_attachment.relative_path
+        attachment.edited_by = edited_by
+        attachment.edited_at = datetime.now()
+        return self.commit_and_refresh(attachment)
+    async def update_file_metadata(self, attachment_id: int, edited_by: int, **kwargs) -> Union[Attachments, None]:
+        attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
+        if not attachment:
+            return None
+        # Update the metadata fields provided in kwargs
+        for key, value in kwargs.items():
+            setattr(attachment, key, value)
+        attachment.edited_by = edited_by
+        attachment.edited_at = datetime.now()
+        return self.commit_and_refresh(attachment)
 
 # File: ./backend/app/services/status_set.py
 from db.models.status_sets import StatusSets
@@ -1260,62 +1323,46 @@ from sqlalchemy.orm import Session
 from .utils.service import BaseService
 class StatusSetService(BaseService):
     def get_status_set(self, status_set_id: int):
-        return self.db.query(StatusSets).filter(StatusSets.id == status_set_id).first()
+        return self.get_by_id(StatusSets, status_set_id)
     def get_status_set_by_name(self, name: str):
         return self.db.query(StatusSets).filter(StatusSets.name == name).first()
     def list_status_sets(self):
         return self.db.query(StatusSets).all()
     def create_status_set(self, status_set_data):
-        status_set = StatusSets(**status_set_data)
-        self.db.add(status_set)
-        self.commit_and_refresh(status_set)
-        return status_set
+        return self.create(StatusSets, status_set_data)
     def update_status_set(self, status_set_id: int, status_set_data):
         status_set = self.get_status_set(status_set_id)
         if not status_set:
             return None
-        for key, value in status_set_data.items():
-            setattr(status_set, key, value)
-        self.commit_and_refresh(status_set)
-        return status_set
+        return self.update(status_set, status_set_data)
     def delete_status_set(self, status_set_id: int):
         status_set = self.get_status_set(status_set_id)
         if not status_set:
             return None
-        self.db.delete(status_set)
-        self.db.commit()
-        return status_set
+        return self.delete(status_set)
 
 # File: ./backend/app/services/user_group.py
 from db.models.user_groups import UserGroups
 from .utils.service import BaseService
 class UserGroupService(BaseService):
     def get_user_group(self, group_id: int):
-        return self.db.query(UserGroups).filter(UserGroups.id == group_id).first()
+        return self.get_by_id(UserGroups, group_id)
     def get_user_group_by_name(self, name: str):
         return self.db.query(UserGroups).filter(UserGroups.name == name).first()
     def list_user_groups(self):
         return self.db.query(UserGroups).all()
     def create_user_group(self, group_data: dict):
-        group = UserGroups(**group_data)
-        self.db.add(group)
-        self.commit_and_refresh(group)
-        return group
+        return self.create(UserGroups, group_data)
     def update_user_group(self, group_id: int, group_data: dict):
         group = self.get_user_group(group_id)
         if not group:
             return None
-        for key, value in group_data.items():
-            setattr(group, key, value)
-        self.commit_and_refresh(group)
-        return group
+        return self.update(group, group_data)
     def delete_user_group(self, group_id: int):
         group = self.get_user_group(group_id)
         if not group:
             return None
-        self.db.delete(group)
-        self.db.commit()
-        return group
+        return self.delete(group)
 
 # File: ./backend/app/services/session.py
 from datetime import datetime
@@ -1333,8 +1380,7 @@ class SessionService(BaseService):
             created_at=created_at,
             expires_at=expires_at
         )
-        self.db.add(session)
-        self.commit_and_refresh(session)
+        self.save(session, refresh=True)
         return session_secret
     def get_session(self, session_secret: str):
         session_hash = hash_session_secret(session_secret)
@@ -1346,14 +1392,12 @@ class SessionService(BaseService):
         session = self.get_session(session_secret)
         if not session:
             return None
-        self.db.delete(session)
-        self.db.commit()
-        return session
+        return self.delete(session)
     def delete_all_sessions(self, user_id: int):
         sessions = self.db.query(Sessions).filter(Sessions.user_id == user_id).all()
         for session in sessions:
             self.db.delete(session)
-        self.commit_and_refresh(session)
+        self.commit()
         return sessions
 
 # File: ./backend/app/services/device.py
@@ -1363,7 +1407,7 @@ from db.models.projects import Projects
 from .utils.service import BaseService
 class DeviceService(BaseService):
     def get_device(self, device_id: int):
-        return self.db.query(Devices).filter(Devices.id == device_id).first()
+        return self.get_by_id(Devices, device_id)
     def get_device_with_project(self, device_id: int):
         return self.db.query(Devices).filter(Devices.id == device_id).options(
             joinedload(Devices.project)
@@ -1371,34 +1415,89 @@ class DeviceService(BaseService):
     def list_devices_by_project(self, project_id: int):
         return self.db.query(Devices).filter(Devices.project_id == project_id).all()
     def create_device(self, device_data):
-        device = Devices(**device_data)
-        self.db.add(device)
-        self.commit_and_refresh(device)
-        return device
+        return self.create(Devices, device_data)
     def update_device(self, device_id: int, device_data):
         device = self.get_device(device_id)
         if not device:
             return None
-        for key, value in device_data.items():
-            setattr(device, key, value)
-        self.commit_and_refresh(device)
-        return device
+        return self.update(device, device_data)
     def delete_device(self, device_id: int):
         device = self.get_device(device_id)
         if not device:
             return None
-        self.db.delete(device)
-        self.db.commit()
-        return device
+        return self.delete(device)
 
 # File: ./backend/app/services/utils/service.py
-from sqlalchemy.orm import Session, joinedload
+from typing import Any, Type
+from sqlalchemy.orm import Session
 class BaseService:
     def __init__(self, db: Session):
         self.db = db
-    def commit_and_refresh(self, object):
+    def commit(self) -> None:
         self.db.commit()
-        self.db.refresh(object)
+    def refresh(self, instance: Any) -> Any:
+        self.db.refresh(instance)
+        return instance
+    def commit_and_refresh(self, instance: Any) -> Any:
+        self.commit()
+        return self.refresh(instance)
+    def add(self, instance: Any) -> Any:
+        self.db.add(instance)
+        return instance
+    def add_and_flush(self, instance: Any) -> Any:
+        self.add(instance)
+        self.db.flush()
+        return instance
+    def save(self, instance: Any, *, refresh: bool = True) -> Any:
+        self.add(instance)
+        if refresh:
+            return self.commit_and_refresh(instance)
+        self.commit()
+        return instance
+    def create(
+        self,
+        model_class: Type[Any],
+        data: dict[str, Any],
+        *,
+        commit: bool = True,
+        refresh: bool = True,
+    ) -> Any:
+        instance = model_class(**data)
+        self.add(instance)
+        if commit:
+            if refresh:
+                return self.commit_and_refresh(instance)
+            self.commit()
+        return instance
+    def update(
+        self,
+        instance: Any,
+        data: dict[str, Any],
+        *,
+        commit: bool = True,
+        refresh: bool = True,
+    ) -> Any:
+        for key, value in data.items():
+            setattr(instance, key, value)
+        if commit:
+            if refresh:
+                return self.commit_and_refresh(instance)
+            self.commit()
+        return instance
+    def delete(self, instance: Any, *, commit: bool = True) -> Any:
+        self.db.delete(instance)
+        if commit:
+            self.commit()
+        return instance
+    def get_by_id(self, model_class: Type[Any], instance_id: Any, *, field_name: str = "id") -> Any:
+        return self.db.query(model_class).filter(getattr(model_class, field_name) == instance_id).first()
+    def get_one(self, model_class: Type[Any], **filters: Any) -> Any:
+        query = self.db.query(model_class)
+        for key, value in filters.items():
+            query = query.filter(getattr(model_class, key) == value)
+        return query.first()
+    def list_all(self, model_class: Type[Any]) -> list[Any]:
+        return self.db.query(model_class).all()
 
 # File: ./backend/app/api/__init__.py
 from fastapi import APIRouter
@@ -1598,11 +1697,79 @@ async def get_current_user_info(
     return current_user
 
 # File: ./backend/app/api/v1/execution.py
-from fastapi import APIRouter
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.api.utils.users import get_current_admin_user, get_current_user
+from app.schemas.execution import ExecutionCreate, ExecutionOut, ExecutionUpdate
+from app.services.execution import ExecutionService
+from db.models.users import Users
+from db.session import get_db
 router = APIRouter(
     prefix="/executions",
     tags=["executions"],
 )
+@router.post("/matrix", response_model=List[ExecutionOut], status_code=status.HTTP_201_CREATED)
+def create_execution_matrix(
+    execution_in: ExecutionCreate,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    service = ExecutionService(db)
+    try:
+        executions = service.create_executions_for_test_suite(
+            test_suite_id=execution_in.test_suite_id,
+            run_id=execution_in.run_id,
+            device_ids=execution_in.device_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return executions
+@router.get("/{execution_id}", response_model=ExecutionOut)
+def get_execution(
+    execution_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    execution = ExecutionService(db).get_execution(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    return execution
+@router.get("/run/{run_id}", response_model=List[ExecutionOut])
+def list_executions_by_run(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    return ExecutionService(db).list_executions_by_run(run_id)
+@router.patch("/{execution_id}", response_model=ExecutionOut)
+def update_execution(
+    execution_id: int,
+    execution_in: ExecutionUpdate,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user),
+):
+    service = ExecutionService(db)
+    try:
+        execution = service.update_execution(
+            execution_id,
+            execution_in.model_dump(exclude_unset=True),
+            current_user,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    return execution
+@router.delete("/{execution_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_execution(
+    execution_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_admin_user),
+):
+    execution = ExecutionService(db).delete_execution(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found")
 
 # File: ./backend/app/api/v1/test_case_version.py
 from typing import List
@@ -2439,7 +2606,7 @@ from sqlalchemy.orm import Session
 from app.services.attachment import AttachmentService
 from app.schemas.attachment import AttachmentOut
 from db.session import get_db
-from app.api.utils.users import get_current_user
+from app.api.utils.users import get_current_user, get_current_admin_user
 from db.models.users import Users
 router = APIRouter(
     prefix="/attachments",
@@ -2456,6 +2623,14 @@ async def upload_file(
     if not attachment:
         raise HTTPException(status_code=400, detail="File could not be saved")
     return attachment
+@router.delete("/delete", response_model=AttachmentOut)
+async def delete_file(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_admin_user)
+):
+    service = AttachmentService(db)
+    return 0
 
 # File: ./backend/app/api/v1/status_set.py
 from typing import List
@@ -2661,7 +2836,31 @@ class TokenPayload(BaseModel):
     exp: int
 
 # File: ./backend/app/schemas/execution.py
-
+from datetime import datetime
+from typing import Optional
+from pydantic import BaseModel, ConfigDict, Field
+class ExecutionBase(BaseModel):
+    device_id: int
+    run_id: int
+    test_case_version_id: int
+    status_id: Optional[int] = None
+    attachment_id: Optional[int] = None
+    resolution_id: Optional[int] = None
+    actual_result: Optional[str] = None
+    execution_order: int
+class ExecutionCreate(BaseModel):
+    test_suite_id: int
+    run_id: int
+    device_ids: list[int] = Field(..., min_length=1)
+class ExecutionUpdate(BaseModel):
+    status_id: Optional[int] = None
+    attachment_id: Optional[int] = None
+    actual_result: Optional[str] = None
+class ExecutionOut(ExecutionBase):
+    id: int
+    executed_by: Optional[int] = None
+    executed_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
 
 # File: ./backend/app/schemas/test_case_version.py
 from pydantic import BaseModel, Field, ConfigDict

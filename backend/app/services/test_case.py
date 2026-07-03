@@ -12,11 +12,7 @@ from .utils.service import BaseService
 class TestCaseService(BaseService):
 
     def get_test_case(self, test_case_id: int):
-        return (
-            self.db.query(TestCases)
-            .filter(TestCases.id == test_case_id)
-            .first()
-        )
+        return self.get_by_id(TestCases, test_case_id)
 
     def get_test_case_with_testsuites(self, test_case_id: int):
         return (
@@ -62,31 +58,19 @@ class TestCaseService(BaseService):
         )
 
     def create_test_case(self, test_case_data):
-        test_case = TestCases(**test_case_data)
-        self.db.add(test_case)
-        self.commit_and_refresh(test_case)
-        return test_case
+        return self.create(TestCases, test_case_data)
     
     def create_test_case_and_version(self, test_case_data, test_case_version_data, test_suite_id: int = None):
-        test_case = TestCases(**test_case_data)
-        self.db.add(test_case)
-        self.db.flush()  # Get ID without committing
+        test_case = self.add_and_flush(TestCases(**test_case_data))
         test_case_version_data["test_case_id"] = test_case.id
-        test_case_version = TestCaseVersions(**test_case_version_data)
-        self.db.add(test_case_version)
-        self.db.flush()
+        test_case_version = self.add_and_flush(TestCaseVersions(**test_case_version_data))
 
         if test_suite_id:
-            suitcase_data = {
-                "test_case_id": test_case.id,
-                "test_suite_id": test_suite_id
-            }
-            suitcase = Suitcases(**suitcase_data)
-            self.db.add(suitcase)
+            self.add_and_flush(Suitcases(test_case_id=test_case.id, test_suite_id=test_suite_id))
 
-        self.db.commit()
-        self.db.refresh(test_case)
-        self.db.refresh(test_case_version)
+        self.commit()
+        self.refresh(test_case)
+        self.refresh(test_case_version)
         return test_case, test_case_version
 
 
@@ -107,21 +91,17 @@ class TestCaseService(BaseService):
             tc_data = {k: v for k, v in item.items() if k in TEST_CASE_FIELDS}
             tcv_data = {k: v for k, v in item.items() if k in VERSION_FIELDS}
  
-            test_case = TestCases(**tc_data)
-            self.db.add(test_case)
-            self.db.flush()  # gives us test_case.id without committing yet
+            test_case = self.add_and_flush(TestCases(**tc_data))
  
             tcv_data.update({
                 "test_case_id": test_case.id,
                 "created_by": created_by,
                 "version": 1,
             })
-            test_case_version = TestCaseVersions(**tcv_data)
-            self.db.add(test_case_version)
-            self.db.flush()
+            test_case_version = self.add_and_flush(TestCaseVersions(**tcv_data))
  
             if test_suite_id:
-                self.db.add(Suitcases(
+                self.add_and_flush(Suitcases(
                     test_case_id=test_case.id,
                     test_suite_id=test_suite_id,
                 ))
@@ -132,8 +112,7 @@ class TestCaseService(BaseService):
                 "version": test_case_version.version,
             })
  
-        # Single commit for the whole batch — all or nothing
-        self.db.commit()
+        self.commit()
         return results
 
     
@@ -144,15 +123,10 @@ class TestCaseService(BaseService):
         test_case = self.get_test_case(test_case_id)
         if not test_case:
             return None
-        for key, value in test_case_data.items():
-            setattr(test_case, key, value)
-        self.commit_and_refresh(test_case)
-        return test_case
+        return self.update(test_case, test_case_data)
 
     def delete_test_case(self, test_case_id: int):
         test_case = self.get_test_case(test_case_id)
         if not test_case:
             return None
-        self.db.delete(test_case)
-        self.db.commit()
-        return test_case
+        return self.delete(test_case)

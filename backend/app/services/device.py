@@ -4,9 +4,15 @@ from db.models.projects import Projects
 from .utils.service import BaseService
 
 
+def _normalize_ram(value):
+    if value is None:
+        return None
+    return str(value) if not isinstance(value, str) else value
+
+
 class DeviceService(BaseService):
     def get_device(self, device_id: int):
-        return self.db.query(Devices).filter(Devices.id == device_id).first()
+        return self.get_by_id(Devices, device_id)
 
     def get_device_with_project(self, device_id: int):
         return self.db.query(Devices).filter(Devices.id == device_id).options(
@@ -17,24 +23,22 @@ class DeviceService(BaseService):
         return self.db.query(Devices).filter(Devices.project_id == project_id).all()
 
     def create_device(self, device_data):
-        device = Devices(**device_data)
-        self.db.add(device)
-        self.commit_and_refresh(device)
-        return device
+        if device_data.get("ram") is not None:
+            device_data = dict(device_data)
+            device_data["ram"] = _normalize_ram(device_data["ram"])
+        return self.create(Devices, device_data)
 
     def update_device(self, device_id: int, device_data):
         device = self.get_device(device_id)
         if not device:
             return None
-        for key, value in device_data.items():
-            setattr(device, key, value)
-        self.commit_and_refresh(device)
-        return device
+        if device_data.get("ram") is not None:
+            device_data = dict(device_data)
+            device_data["ram"] = _normalize_ram(device_data["ram"])
+        return self.update(device, device_data)
 
     def delete_device(self, device_id: int):
         device = self.get_device(device_id)
         if not device:
             return None
-        self.db.delete(device)
-        self.db.commit()
-        return device
+        return self.delete(device)

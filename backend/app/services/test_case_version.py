@@ -8,7 +8,7 @@ from .utils.service import BaseService
 
 class TestCaseVersionService(BaseService):
     def get_test_case_version(self, test_case_version_id: int):
-        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).first()
+        return self.get_by_id(TestCaseVersions, test_case_version_id)
     
     def get_test_case_version_with_test_case(self, test_case_version_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
@@ -28,12 +28,21 @@ class TestCaseVersionService(BaseService):
             TestCaseVersions.test_case_id == test_case_id,
             TestCaseVersions.release_ready == True
         ).order_by(TestCaseVersions.created_at.desc()).first()
+
+    def get_latest_test_case_version_by_test_case_id(self, test_case_id: int):
+        version = self.get_latest_release_ready_test_case_version_by_test_case_id(test_case_id)
+        if version:
+            return version
+
+        return (
+            self.db.query(TestCaseVersions)
+            .filter(TestCaseVersions.test_case_id == test_case_id)
+            .order_by(TestCaseVersions.created_at.desc(), TestCaseVersions.version.desc())
+            .first()
+        )
     
     def create_test_case_version(self, test_case_version_data):
-        test_case_version = TestCaseVersions(**test_case_version_data)
-        self.db.add(test_case_version)
-        self.commit_and_refresh(test_case_version)
-        return test_case_version
+        return self.create(TestCaseVersions, test_case_version_data)
 
     def list_test_case_versions_by_test_case(self, test_case_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id).all()
@@ -42,15 +51,10 @@ class TestCaseVersionService(BaseService):
         test_case_version = self.get_test_case_version(test_case_version_id)
         if not test_case_version:
             return None
-        for key, value in test_case_version_data.items():
-            setattr(test_case_version, key, value)
-        self.commit_and_refresh(test_case_version)
-        return test_case_version
+        return self.update(test_case_version, test_case_version_data)
 
     def delete_test_case_version(self, test_case_version_id: int):
         test_case_version = self.get_test_case_version(test_case_version_id)
         if not test_case_version:
             return None
-        self.db.delete(test_case_version)
-        self.db.commit()
-        return test_case_version
+        return self.delete(test_case_version)

@@ -8,14 +8,16 @@ class Attachments(Base):
 
     id = Column(Integer, primary_key=True)
 
-    parent_attachment_id = Column(Integer, ForeignKey("attachments.id",use_alter=True), nullable=True)
-    uploaded_by = Column(Integer, ForeignKey("users.id",use_alter=True), nullable=False)
-    #resolution_id = Column(Integer, ForeignKey("resolutions.id",use_alter=True), nullable=True)
+    parent_attachment_id = Column(Integer, ForeignKey("attachments.id"), nullable=True)
+    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    #resolution_id = Column(Integer, ForeignKey("resolutions.id"), nullable=True)
+    edited_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     filename = Column(String)
     relative_path = Column(String)
 
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    edited_at = Column(DateTime(timezone=True), onupdate=func.now())
     #presentmon_version = Column(String)
 
     #settings = Column(JSON)
@@ -27,6 +29,7 @@ class Attachments(Base):
     )
 
     uploader = relationship("Users", back_populates="uploads", foreign_keys=[uploaded_by])
+    editor = relationship("Users", back_populates="edits", foreign_keys=[edited_by])
     #resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
     executions = relationship("Executions", back_populates="attachment", foreign_keys="Executions.attachment_id")
 
@@ -34,7 +37,9 @@ class Attachments(Base):
     __table_args__ = (
         Index("attachment_parent_idx", "parent_attachment_id"),
         Index("attachment_uploaded_by_idx", "uploaded_by"),
+        Index("attachment_edited_by_idx", "edited_by"),
         Index("attachment_filename_idx", "filename"),
         Index("attachment_uploaded_at_idx", "uploaded_at"),
+        Index("attachment_edited_at_idx", "edited_at"),
         #Index("attachment_resolution_idx", "resolution_id"),
     )

@@ -219,6 +219,24 @@ def current_user(auth_client, db_session):
 # SERVICE TESTS
 # ===========================================================================
 
+def test_base_service_create_and_update_helpers_work(db_session):
+    from db.models.clients import Clients
+    from app.services.utils.service import BaseService
+
+    class DummyService(BaseService):
+        pass
+
+    service = DummyService(db_session)
+
+    client = service.create(Clients, {"name": "BaseClient"})
+    assert client.id is not None
+    assert client.name == "BaseClient"
+
+    updated = service.update(client, {"name": "UpdatedClient"})
+    assert updated.name == "UpdatedClient"
+
+    deleted = service.delete(client)
+    assert deleted.id == client.id
 
 class TestAuthService:
     def test_register_creates_user(self, db_session):
@@ -1091,6 +1109,114 @@ class TestStatusService:
         assert StatusService(db_session).delete_status(99999) is None
 
 
+class TestExecutionService:
+    def test_matrix_creation_and_status_update_workflow(self, db_session, make_client, make_project, current_user):
+        from app.services.device import DeviceService
+        from app.services.execution import ExecutionService
+        from app.services.project import ProjectService
+        from app.services.run import RunService
+        from app.services.scenario import ScenarioService
+        from app.services.status import StatusService
+        from app.services.status_set import StatusSetService
+        from app.services.suitcase import SuitcaseService
+        from app.services.test_case import TestCaseService
+        from app.services.test_case_version import TestCaseVersionService
+        from app.services.test_suite import TestSuiteService
+
+        client = make_client(name="ExecClient")
+        project = make_project(client=client, name="ExecProject")
+        run = RunService(db_session).create_run({"name": "Run-1", "project_id": project.id})
+        device_a = DeviceService(db_session).create_device(
+            {
+                "name_external": "Device A",
+                "name_internal": "device-a",
+                "cpu": "i7",
+                "gpu": "RTX",
+                "ram": "16GB",
+                "project_id": project.id,
+            }
+        )
+        device_b = DeviceService(db_session).create_device(
+            {
+                "name_external": "Device B",
+                "name_internal": "device-b",
+                "cpu": "i7",
+                "gpu": "RTX",
+                "ram": "16GB",
+                "project_id": project.id,
+            }
+        )
+
+        scenario = ScenarioService(db_session).create_scenario({"name": f"Scenario-{_uid()}"})
+        status_set = StatusSetService(db_session).create_status_set({"name": f"SS-{_uid()}"})
+        allowed_status = StatusService(db_session).create_status(
+            {"status_set_id": status_set.id, "name": "Passed", "description": "passed"}
+        )
+
+        tc_one = TestCaseService(db_session).create_test_case(
+            {"scenario_id": scenario.id, "status_set_id": status_set.id}
+        )
+        tc_two = TestCaseService(db_session).create_test_case(
+            {"scenario_id": scenario.id, "status_set_id": status_set.id}
+        )
+        TestCaseVersionService(db_session).create_test_case_version(
+            {
+                "test_case_id": tc_one.id,
+                "version": 1,
+                "name": "v1",
+                "description": "d",
+                "steps": "s",
+                "expected_result": "e",
+                "release_ready": True,
+                "created_by": current_user.id,
+            }
+        )
+        TestCaseVersionService(db_session).create_test_case_version(
+            {
+                "test_case_id": tc_two.id,
+                "version": 1,
+                "name": "v1",
+                "description": "d",
+                "steps": "s",
+                "expected_result": "e",
+                "release_ready": True,
+                "created_by": current_user.id,
+            }
+        )
+
+        test_suite = TestSuiteService(db_session).create_test_suite({"name": f"Suite-{_uid()}"})
+        SuitcaseService(db_session).create_suitcase({"test_case_id": tc_one.id, "test_suite_id": test_suite.id})
+        SuitcaseService(db_session).create_suitcase({"test_case_id": tc_two.id, "test_suite_id": test_suite.id})
+
+        executions = ExecutionService(db_session).create_executions_for_test_suite(
+            test_suite_id=test_suite.id,
+            run_id=run.id,
+            device_ids=[device_a.id, device_b.id],
+        )
+
+        assert len(executions) == 4
+        assert all(item.executed_by is None for item in executions)
+        assert all(item.status_id is None for item in executions)
+        assert all(item.actual_result is None for item in executions)
+        assert all(item.executed_at is None for item in executions)
+
+        updated = ExecutionService(db_session).update_execution(
+            executions[0].id,
+            {"status_id": allowed_status.id, "actual_result": "passed"},
+            current_user,
+        )
+        assert updated.executed_by == current_user.id
+        assert updated.executed_at is not None
+        assert updated.actual_result == "passed"
+
+        with pytest.raises(ValueError):
+            ExecutionService(db_session).update_execution(
+                executions[1].id,
+                {"status_id": 999999},
+                current_user,
+            )
+
+
 class TestUserGroupService:
     def _make_user(self, db_session):
         from app.services.auth import AuthService
@@ -1349,14 +1475,14 @@ class TestDeviceAPI:
     def test_update_device_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/devices/99999", json={"name_external": "X"}).status_code == 404
 
-    def test_delete_device(self, auth_client):
-        pid = self._setup(auth_client)
-        did = auth_client.post("/api/v1/devices/", json=self._device_payload(pid)).json()["id"]
-        assert auth_client.delete(f"/api/v1/devices/{did}").status_code == 204
-        assert auth_client.get(f"/api/v1/devices/{did}").status_code == 404
+    def test_delete_device(self, admin_client):
+        pid = self._setup(admin_client)
+        did = admin_client.post("/api/v1/devices/", json=self._device_payload(pid)).json()["id"]
+        assert admin_client.delete(f"/api/v1/devices/{did}").status_code == 204
+        assert admin_client.get(f"/api/v1/devices/{did}").status_code == 404
 
-    def test_delete_device_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/devices/99999").status_code == 404
+    def test_delete_device_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/devices/99999").status_code == 404
 
     def test_device_requires_auth(self, client):
         assert client.get("/api/v1/devices/1").status_code == 401
@@ -1405,16 +1531,16 @@ class TestRunAPI:
     def test_update_run_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/runs/99999", json={"name": "X"}).status_code == 404
 
-    def test_delete_run(self, auth_client):
-        pid = self._project_id(auth_client)
-        rid = auth_client.post(
+    def test_delete_run(self, admin_client):
+        pid = self._project_id(admin_client)
+        rid = admin_client.post(
             "/api/v1/runs/", json={"name": f"R-{_uid()}", "project_id": pid}
         ).json()["id"]
-        assert auth_client.delete(f"/api/v1/runs/{rid}").status_code == 204
-        assert auth_client.get(f"/api/v1/runs/{rid}").status_code == 404
+        assert admin_client.delete(f"/api/v1/runs/{rid}").status_code == 204
+        assert admin_client.get(f"/api/v1/runs/{rid}").status_code == 404
 
-    def test_delete_run_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/runs/99999").status_code == 404
+    def test_delete_run_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/runs/99999").status_code == 404
 
     def test_run_requires_auth(self, client):
         assert client.get("/api/v1/runs/1").status_code == 401
@@ -1458,13 +1584,13 @@ class TestTestSuiteAPI:
     def test_update_test_suite_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/test-suites/99999", json={"name": "X"}).status_code == 404
 
-    def test_delete_test_suite(self, auth_client):
-        sid = auth_client.post("/api/v1/test-suites/", json={"name": f"DS-{_uid()}"}).json()["id"]
-        assert auth_client.delete(f"/api/v1/test-suites/{sid}").status_code == 204
-        assert auth_client.get(f"/api/v1/test-suites/{sid}").status_code == 404
+    def test_delete_test_suite(self, admin_client):
+        sid = admin_client.post("/api/v1/test-suites/", json={"name": f"DS-{_uid()}"}).json()["id"]
+        assert admin_client.delete(f"/api/v1/test-suites/{sid}").status_code == 204
+        assert admin_client.get(f"/api/v1/test-suites/{sid}").status_code == 404
 
-    def test_delete_test_suite_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/test-suites/99999").status_code == 404
+    def test_delete_test_suite_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/test-suites/99999").status_code == 404
 
     def test_test_suite_requires_auth(self, client):
         assert client.get("/api/v1/test-suites/").status_code == 401
@@ -1519,15 +1645,15 @@ class TestTestCaseAPI:
     def test_update_test_case_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/test-cases/99999", json={}).status_code == 404
 
-    def test_delete_test_case(self, auth_client, db_session):
+    def test_delete_test_case(self, admin_client, db_session):
         sc_id, ss_id = self._prereqs(db_session)
-        tc_id = auth_client.post(
+        tc_id = admin_client.post(
             "/api/v1/test-cases/", json={"scenario_id": sc_id, "status_set_id": ss_id}
         ).json()["id"]
-        assert auth_client.delete(f"/api/v1/test-cases/{tc_id}").status_code == 204
+        assert admin_client.delete(f"/api/v1/test-cases/{tc_id}").status_code == 204
 
-    def test_delete_test_case_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/test-cases/99999").status_code == 404
+    def test_delete_test_case_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/test-cases/99999").status_code == 404
 
     def test_bulk_create_without_suite(self, auth_client, db_session):
         sc_id, ss_id = self._prereqs(db_session)
@@ -1647,16 +1773,16 @@ class TestTestCaseVersionAPI:
             == 404
         )
 
-    def test_delete_version(self, auth_client, db_session):
-        tc_id, user_id = self._make_tc(auth_client, db_session)
-        vid = auth_client.post(
+    def test_delete_version(self, admin_client, db_session):
+        tc_id, user_id = self._make_tc(admin_client, db_session)
+        vid = admin_client.post(
             "/api/v1/test-case-versions/", json=self._version_payload(tc_id, user_id)
         ).json()["id"]
-        assert auth_client.delete(f"/api/v1/test-case-versions/{vid}").status_code == 204
-        assert auth_client.get(f"/api/v1/test-case-versions/{vid}").status_code == 404
+        assert admin_client.delete(f"/api/v1/test-case-versions/{vid}").status_code == 204
+        assert admin_client.get(f"/api/v1/test-case-versions/{vid}").status_code == 404
 
-    def test_delete_version_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/test-case-versions/99999").status_code == 404
+    def test_delete_version_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/test-case-versions/99999").status_code == 404
 
     def test_release_ready_flag_persists(self, auth_client, db_session):
         tc_id, user_id = self._make_tc(auth_client, db_session)
@@ -1730,16 +1856,16 @@ class TestSuitcaseAPI:
     def test_update_suitcase_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/suitcases/99999", json={}).status_code == 404
 
-    def test_delete_suitcase(self, auth_client, db_session):
-        tc_id, ts_id = self._prereqs(auth_client, db_session)
-        sc_id = auth_client.post(
+    def test_delete_suitcase(self, admin_client, db_session):
+        tc_id, ts_id = self._prereqs(admin_client, db_session)
+        sc_id = admin_client.post(
             "/api/v1/suitcases/", json={"test_case_id": tc_id, "test_suite_id": ts_id}
         ).json()["id"]
-        assert auth_client.delete(f"/api/v1/suitcases/{sc_id}").status_code == 204
-        assert auth_client.get(f"/api/v1/suitcases/{sc_id}").status_code == 404
+        assert admin_client.delete(f"/api/v1/suitcases/{sc_id}").status_code == 204
+        assert admin_client.get(f"/api/v1/suitcases/{sc_id}").status_code == 404
 
-    def test_delete_suitcase_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/suitcases/99999").status_code == 404
+    def test_delete_suitcase_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/suitcases/99999").status_code == 404
 
     def test_bulk_create(self, auth_client, db_session):
         from app.services.scenario import ScenarioService
@@ -1852,13 +1978,13 @@ class TestResolutionAPI:
     def test_update_resolution_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/resolutions/99999", json={"w": 1}).status_code == 404
 
-    def test_delete_resolution(self, auth_client):
-        rid = auth_client.post("/api/v1/resolutions/", json={"w": 100, "h": 200}).json()["id"]
-        assert auth_client.delete(f"/api/v1/resolutions/{rid}").status_code == 204
-        assert auth_client.get(f"/api/v1/resolutions/{rid}").status_code == 404
+    def test_delete_resolution(self, admin_client):
+        rid = admin_client.post("/api/v1/resolutions/", json={"w": 100, "h": 200}).json()["id"]
+        assert admin_client.delete(f"/api/v1/resolutions/{rid}").status_code == 204
+        assert admin_client.get(f"/api/v1/resolutions/{rid}").status_code == 404
 
-    def test_delete_resolution_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/resolutions/99999").status_code == 404
+    def test_delete_resolution_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/resolutions/99999").status_code == 404
 
     def test_resolution_requires_auth(self, client):
         assert client.get("/api/v1/resolutions/1").status_code == 401
@@ -1895,13 +2021,13 @@ class TestScenarioAPI:
     def test_update_scenario_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/scenarios/99999", json={"name": "X"}).status_code == 404
 
-    def test_delete_scenario(self, auth_client):
-        sid = auth_client.post("/api/v1/scenarios/", json={"name": f"Del-{_uid()}"}).json()["id"]
-        assert auth_client.delete(f"/api/v1/scenarios/{sid}").status_code == 204
-        assert auth_client.get(f"/api/v1/scenarios/{sid}").status_code == 404
+    def test_delete_scenario(self, admin_client):
+        sid = admin_client.post("/api/v1/scenarios/", json={"name": f"Del-{_uid()}"}).json()["id"]
+        assert admin_client.delete(f"/api/v1/scenarios/{sid}").status_code == 204
+        assert admin_client.get(f"/api/v1/scenarios/{sid}").status_code == 404
 
-    def test_delete_scenario_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/scenarios/99999").status_code == 404
+    def test_delete_scenario_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/scenarios/99999").status_code == 404
 
     def test_scenario_requires_auth(self, client):
         assert client.get("/api/v1/scenarios/1").status_code == 401
@@ -1937,13 +2063,13 @@ class TestStatusSetAPI:
     def test_update_status_set_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/status-sets/99999", json={"name": "X"}).status_code == 404
 
-    def test_delete_status_set(self, auth_client):
-        sid = auth_client.post("/api/v1/status-sets/", json={"name": f"Del-{_uid()}"}).json()["id"]
-        assert auth_client.delete(f"/api/v1/status-sets/{sid}").status_code == 204
-        assert auth_client.get(f"/api/v1/status-sets/{sid}").status_code == 404
+    def test_delete_status_set(self, admin_client):
+        sid = admin_client.post("/api/v1/status-sets/", json={"name": f"Del-{_uid()}"}).json()["id"]
+        assert admin_client.delete(f"/api/v1/status-sets/{sid}").status_code == 204
+        assert admin_client.get(f"/api/v1/status-sets/{sid}").status_code == 404
 
-    def test_delete_status_set_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/status-sets/99999").status_code == 404
+    def test_delete_status_set_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/status-sets/99999").status_code == 404
 
     def test_status_set_requires_auth(self, client):
         assert client.get("/api/v1/status-sets/1").status_code == 401
@@ -2001,19 +2127,36 @@ class TestStatusAPI:
     def test_update_status_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/status/99999", json={"name": "X"}).status_code == 404
 
-    def test_delete_status(self, auth_client):
-        ss_id = self._status_set_id(auth_client)
-        sid = auth_client.post(
+    def test_delete_status(self, admin_client):
+        ss_id = self._status_set_id(admin_client)
+        sid = admin_client.post(
             "/api/v1/status/", json={"status_set_id": ss_id, "name": "Del", "description": ""}
         ).json()["id"]
-        assert auth_client.delete(f"/api/v1/status/{sid}").status_code == 204
-        assert auth_client.get(f"/api/v1/status/{sid}").status_code == 404
+        assert admin_client.delete(f"/api/v1/status/{sid}").status_code == 204
+        assert admin_client.get(f"/api/v1/status/{sid}").status_code == 404
 
-    def test_delete_status_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/status/99999").status_code == 404
+    def test_delete_status_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/status/99999").status_code == 404
 
     def test_status_requires_auth(self, client):
         assert client.get("/api/v1/status/1").status_code == 401
+
+
+class TestAttachmentAPI:
+    def test_upload_attachment(self, auth_client):
+        files = {"file": ("sample.txt", b"hello from test", "text/plain")}
+        r = auth_client.post("/api/v1/attachments/upload", files=files)
+        assert r.status_code == 201
+        assert r.json()["filename"] == "sample.txt"
+
+    def test_upload_attachment_rejects_unsupported_extension(self, auth_client):
+        files = {"file": ("sample.exe", b"not allowed", "application/octet-stream")}
+        r = auth_client.post("/api/v1/attachments/upload", files=files)
+        assert r.status_code == 400
+
+    def test_attachment_requires_auth(self, client):
+        files = {"file": ("sample.txt", b"hello", "text/plain")}
+        assert client.post("/api/v1/attachments/upload", files=files).status_code == 401
 
 
 class TestUserGroupAPI:
@@ -2064,67 +2207,68 @@ class TestUserGroupAPI:
     def test_update_user_group_not_found(self, auth_client):
         assert auth_client.patch("/api/v1/user-groups/99999", json={"name": "X"}).status_code == 404
 
-    def test_delete_user_group(self, auth_client, current_user):
-        gid = auth_client.post(
+    def test_delete_user_group(self, admin_client):
+        me = admin_client.get("/api/v1/auth/me").json()
+        gid = admin_client.post(
             "/api/v1/user-groups/",
-            json={"name": f"DelG-{_uid()}", "owner_id": current_user.id},
+            json={"name": f"DelG-{_uid()}", "owner_id": me["id"]},
         ).json()["id"]
-        assert auth_client.delete(f"/api/v1/user-groups/{gid}").status_code == 204
-        assert auth_client.get(f"/api/v1/user-groups/{gid}").status_code == 404
+        assert admin_client.delete(f"/api/v1/user-groups/{gid}").status_code == 204
+        assert admin_client.get(f"/api/v1/user-groups/{gid}").status_code == 404
 
-    def test_delete_user_group_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/user-groups/99999").status_code == 404
+    def test_delete_user_group_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/user-groups/99999").status_code == 404
 
     def test_user_group_requires_auth(self, client):
         assert client.get("/api/v1/user-groups/1").status_code == 401
 
 
 class TestUserTypeAPI:
-    def test_create_user_type(self, auth_client):
-        r = auth_client.post(
+    def test_create_user_type(self, admin_client):
+        r = admin_client.post(
             "/api/v1/user-types/", json={"name": f"type-{_uid()}", "description": "test"}
         )
         assert r.status_code == 201
 
-    def test_get_user_type(self, auth_client):
-        ut_id = auth_client.post(
+    def test_get_user_type(self, admin_client):
+        ut_id = admin_client.post(
             "/api/v1/user-types/", json={"name": f"gt-{_uid()}", "description": "desc"}
         ).json()["id"]
-        r = auth_client.get(f"/api/v1/user-types/{ut_id}")
+        r = admin_client.get(f"/api/v1/user-types/{ut_id}")
         assert r.status_code == 200
 
     def test_get_user_type_not_found(self, auth_client):
         assert auth_client.get("/api/v1/user-types/99999").status_code == 404
 
-    def test_list_user_types(self, auth_client):
-        auth_client.post("/api/v1/user-types/", json={"name": f"lt1-{_uid()}", "description": ""})
-        auth_client.post("/api/v1/user-types/", json={"name": f"lt2-{_uid()}", "description": ""})
-        r = auth_client.get("/api/v1/user-types/")
+    def test_list_user_types(self, admin_client):
+        admin_client.post("/api/v1/user-types/", json={"name": f"lt1-{_uid()}", "description": ""})
+        admin_client.post("/api/v1/user-types/", json={"name": f"lt2-{_uid()}", "description": ""})
+        r = admin_client.get("/api/v1/user-types/")
         assert r.status_code == 200
         assert len(r.json()) >= 2
 
-    def test_update_user_type(self, auth_client):
-        ut_id = auth_client.post(
+    def test_update_user_type(self, admin_client):
+        ut_id = admin_client.post(
             "/api/v1/user-types/", json={"name": f"ut-{_uid()}", "description": "old"}
         ).json()["id"]
-        r = auth_client.patch(
+        r = admin_client.patch(
             f"/api/v1/user-types/{ut_id}", json={"description": "new"}
         )
         assert r.status_code == 200
         assert r.json()["description"] == "new"
 
-    def test_update_user_type_not_found(self, auth_client):
-        assert auth_client.patch("/api/v1/user-types/99999", json={"description": "x"}).status_code == 404
+    def test_update_user_type_not_found(self, admin_client):
+        assert admin_client.patch("/api/v1/user-types/99999", json={"description": "x"}).status_code == 404
 
-    def test_delete_user_type(self, auth_client):
-        ut_id = auth_client.post(
+    def test_delete_user_type(self, admin_client):
+        ut_id = admin_client.post(
             "/api/v1/user-types/", json={"name": f"dt-{_uid()}", "description": "del"}
         ).json()["id"]
-        assert auth_client.delete(f"/api/v1/user-types/{ut_id}").status_code == 204
-        assert auth_client.get(f"/api/v1/user-types/{ut_id}").status_code == 404
+        assert admin_client.delete(f"/api/v1/user-types/{ut_id}").status_code == 204
+        assert admin_client.get(f"/api/v1/user-types/{ut_id}").status_code == 404
 
-    def test_delete_user_type_not_found(self, auth_client):
-        assert auth_client.delete("/api/v1/user-types/99999").status_code == 404
+    def test_delete_user_type_not_found(self, admin_client):
+        assert admin_client.delete("/api/v1/user-types/99999").status_code == 404
 
     def test_user_type_requires_auth(self, client):
         assert client.get("/api/v1/user-types/1").status_code == 401

@@ -18,8 +18,7 @@ class SessionService(BaseService):
             created_at=created_at,
             expires_at=expires_at
         )
-        self.db.add(session)
-        self.commit_and_refresh(session)
+        self.save(session, refresh=True)
         return session_secret
     
     def get_session(self, session_secret: str):
@@ -35,14 +34,12 @@ class SessionService(BaseService):
         if not session:
             return None
         
-        self.db.delete(session)
-        self.db.commit()
-        return session
+        return self.delete(session)
     
     def delete_all_sessions(self, user_id: int):
         sessions = self.db.query(Sessions).filter(Sessions.user_id == user_id).all()
         
         for session in sessions:
             self.db.delete(session)
-        self.commit_and_refresh(session)
+        self.commit()
         return sessions
