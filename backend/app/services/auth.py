@@ -1,7 +1,5 @@
-from sqlalchemy.orm import Session
+
 from db.models.users import Users
-from db.models.sessions import Sessions as UserSessions
-from app.api.utils.auth import hash_password, verify_password
 from datetime import datetime, timedelta, timezone
 
 from core.config import settings
@@ -9,6 +7,7 @@ from app.services.users import UserService
 from app.services.session import SessionService
 from app.services.user_type import UserTypeService
 from .utils.service import BaseService
+from core.security import PasswordHasher
 
 
 class AuthService(BaseService):
@@ -17,7 +16,7 @@ class AuthService(BaseService):
         user = UserService(self.db).get_user_by_email(email)
         if not user:
             return None
-        if not verify_password(password, user.password):
+        if not PasswordHasher.verify(password, user.password):
             return None
 
         now = datetime.now(timezone.utc)
@@ -27,7 +26,7 @@ class AuthService(BaseService):
 
         self.update(user, {"last_login_at": now})
 
-        return {"user": user, "access_token": session_secret}
+        return {"user": user, "access_token": session_secret, "expires_at": exp.timestamp()}
     
     def validate_session(self, session_secret: str):
         session = SessionService(self.db).get_session(session_secret=session_secret)
@@ -58,7 +57,7 @@ class AuthService(BaseService):
         if not regular_user_type:
             return None
         
-        hashed_password = hash_password(password)
+        hashed_password = PasswordHasher.hash(password)
         return self.create(
             Users,
             {

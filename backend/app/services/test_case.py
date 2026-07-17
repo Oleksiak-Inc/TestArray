@@ -4,7 +4,6 @@ from sqlalchemy.orm import joinedload
 from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
-from app.services.suitcase import SuitcaseService
 
 from .utils.service import BaseService
 
@@ -31,7 +30,7 @@ class TestCaseService(BaseService):
             text("""
                 SELECT DISTINCT ON (tc.id)
                     tc.id AS test_case_id,
-                    tc.name AS test_case_name,
+                    tcv.name AS test_case_name,
                     tcv.id AS version_id,
                     tcv.created_at,
                     tcv.release_ready

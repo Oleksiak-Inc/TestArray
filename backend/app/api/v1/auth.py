@@ -1,14 +1,15 @@
 from sqlalchemy.orm import Session
 from app.schemas.auth import *
-from fastapi import APIRouter, Depends, HTTPException, Response, Cookie
+from fastapi import APIRouter, Depends, Response, Cookie, status
 from typing import Optional
-from datetime import datetime, timedelta, timezone
 from app.schemas.users import UserOut
-from app.api.utils.users import get_current_user
+from app.api.utils.http_errors import HttpError
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from db.models.users import Users
 from app.services.auth import AuthService
 from core.config import settings
+
 
 router = APIRouter(
     prefix="/auth",
@@ -26,20 +27,22 @@ async def login(
         password=login_data.password
     )
     if not result:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        HttpError.unauthorized("Invalid credentials")
     
+    secure = settings.SECURE_COOKIES
+
     response.set_cookie(
         key="session",
         value=result["access_token"],
         httponly=True,
-        #secure=True,
+        secure=secure,
         samesite="lax",
         max_age=settings.ACCESS_TOKEN_EXPIRE_SECONDS
     )
 
     return TokenPayload(
         sub=result["user"].id,
-        exp=int((datetime.now(timezone.utc) + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)).timestamp())
+        exp=int(result["expires_at"]),
     )
 
 @router.post("/logout")
@@ -49,11 +52,11 @@ async def logout(
     db: Session = Depends(get_db),
 ):
     if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        HttpError.unauthorized()
 
     is_valid = AuthService(db).validate_session(session)
     if not is_valid:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        HttpError.unauthorized()
     
     AuthService(db).logout_user(session)
 
@@ -73,7 +76,7 @@ async def register(
         password=login_data.password
     )
     if not result:
-        raise HTTPException(status_code=400, detail="User already exists")
+        HttpError.bad_request('User already exists')
 
     return UserOut(
         id=result.id,
@@ -82,7 +85,6 @@ async def register(
         last_name=result.last_name,
         active=result.active,
         user_type_id=result.user_type_id,
-        user_group_id=result.user_group_id,
         created_at=result.created_at,
         last_login_at=result.last_login_at
     )

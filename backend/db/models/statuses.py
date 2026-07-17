@@ -7,7 +7,7 @@ class Statuses(Base):
 
     id = Column(Integer, primary_key=True)
     status_set_id = Column(Integer, ForeignKey("status_sets.id"), nullable=False)
-    name = Column(String, nullable=False)
+    name = Column(String(255), nullable=False)
     description = Column(Text)
 
     status_set = relationship("StatusSets", back_populates="statuses", foreign_keys=[status_set_id])

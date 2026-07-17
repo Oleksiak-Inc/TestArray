@@ -1,10 +1,4 @@
-from sqlalchemy import text
-from sqlalchemy.orm import joinedload
-
-from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
-from db.models.test_case_versions import TestCaseVersions
-
 from .utils.service import BaseService
 
 

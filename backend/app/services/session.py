@@ -1,16 +1,15 @@
 
 from datetime import datetime
-from sqlalchemy.orm import Session
 from db.models.sessions import Sessions
-from app.api.utils.sessions import generate_session_secret, hash_session_secret
+from core.security_tokens import SessionTokenFactory
 from .utils.service import BaseService
 
 class SessionService(BaseService):
 
     def create_session(self, user_id: int, expires_at: datetime, created_at: datetime) -> str:
         
-        session_secret = generate_session_secret()
-        session_hash = hash_session_secret(session_secret)
+        session_secret = SessionTokenFactory.generate_secret()
+        session_hash = SessionTokenFactory.hash_secret(session_secret)
 
         session = Sessions(
             user_id=user_id,
@@ -22,7 +21,7 @@ class SessionService(BaseService):
         return session_secret
     
     def get_session(self, session_secret: str):
-        session_hash = hash_session_secret(session_secret)
+        session_hash = SessionTokenFactory.hash_secret(session_secret)
         session = self.db.query(Sessions).filter(Sessions.token == session_hash).first()
         if not session:
             return None

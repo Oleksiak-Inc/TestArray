@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.user_group import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.user_group import UserGroupService
 
@@ -18,20 +18,23 @@ router = APIRouter(
 def create_user_group(
     group_in: UserGroupCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("user_groups.write")),
 ):
     service = UserGroupService(db)
     # Auto-set created_by_id to the current user
     data = group_in.model_dump()
     data["created_by_id"] = current_user.id
-    return service.create_user_group(data)
+    try:
+        return service.create_user_group(data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/{group_id}", response_model=UserGroupOut)
 def get_user_group(
     group_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("user_groups.read")),
 ):
     group = UserGroupService(db).get_user_group(group_id)
     if not group:
@@ -42,7 +45,7 @@ def get_user_group(
 @router.get("/", response_model=List[UserGroupOut])
 def list_user_groups(
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("user_groups.read")),
 ):
     return UserGroupService(db).list_user_groups()
 
@@ -52,7 +55,7 @@ def update_user_group(
     group_id: int,
     group_in: UserGroupUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("user_groups.write")),
 ):
     group = UserGroupService(db).update_user_group(
         group_id, group_in.model_dump(exclude_unset=True)

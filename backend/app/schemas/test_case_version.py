@@ -13,10 +13,6 @@ class TestCaseVersionBase(BaseModel):
     release_ready: bool = False
 
 
-class TestCaseVersionCreate(TestCaseVersionBase):
-    created_by: Optional[int] = None
-
-
 class TestCaseVersionUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.suitcase import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.suitcase import SuitcaseService
 from db.models.test_cases import TestCases
@@ -20,7 +20,7 @@ router = APIRouter(
 def create_suitcase(
     suitcase_in: SuitcaseCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("suitcases.write")),
 ):
     service = SuitcaseService(db)
     suitcase = service.create_suitcase(suitcase_in.model_dump())
@@ -30,7 +30,7 @@ def create_suitcase(
 def create_suitcases_bulk(
     bulk_in: SuitcaseBulkCreateIn,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("suitcases.write")),
 ):
     # Validate suite exists
     suite = db.query(TestSuites).filter(TestSuites.id == bulk_in.test_suite_id).first()
@@ -61,7 +61,7 @@ def create_suitcases_bulk(
 def get_suitcase(
     suitcase_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("suitcases.read")),
 ):
     suitcase = SuitcaseService(db).get_suitcase(suitcase_id)
     if not suitcase:
@@ -73,7 +73,7 @@ def get_suitcase(
 def list_suitcases_by_test_case(
     test_case_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("suitcases.read")),
 ):
     suitcases = SuitcaseService(db).get_suitcases_by_test_case_id(test_case_id)
     return suitcases
@@ -83,7 +83,7 @@ def list_suitcases_by_test_case(
 def list_suitcases_by_test_suite(
     test_suite_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("suitcases.read")),
 ):
     suitcases = SuitcaseService(db).get_suitcases_by_test_suite_id(test_suite_id)
     return suitcases
@@ -94,7 +94,7 @@ def update_suitcase(
     suitcase_id: int,
     suitcase_in: SuitcaseUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("suitcases.write")),
 ):
     suitcase = SuitcaseService(db).update_suitcase(suitcase_id, suitcase_in.model_dump(exclude_unset=True))
     if not suitcase:

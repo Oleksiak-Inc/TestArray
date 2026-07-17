@@ -1,10 +1,11 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.schemas.user_type import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.http_errors import HttpError
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.user_type import UserTypeService
 
@@ -18,7 +19,7 @@ router = APIRouter(
 def create_user_type(
     user_type_in: UserTypeCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(get_current_user),
 ):
     service = UserTypeService(db)
     return service.create_user_type(user_type_in.model_dump())
@@ -32,7 +33,7 @@ def get_user_type(
 ):
     user_type = UserTypeService(db).get_user_type_by_id(user_type_id)
     if not user_type:
-        raise HTTPException(status_code=404, detail="User type not found")
+        HttpError.not_found("User type not found")
     return user_type
 
 
@@ -57,7 +58,7 @@ def update_user_type(
         user_type_id, user_type_in.model_dump(exclude_unset=True)
     )
     if not user_type:
-        raise HTTPException(status_code=404, detail="User type not found")
+        HttpError.not_found("User type not found")
     return user_type
 
 
@@ -65,12 +66,12 @@ def update_user_type(
 def delete_user_type(
     user_type_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(get_current_user),
 ):
     # we add a delete method to the service or delete directly
     from db.models.user_types import UserTypes
     user_type = db.query(UserTypes).filter(UserTypes.id == user_type_id).first()
     if not user_type:
-        raise HTTPException(status_code=404, detail="User type not found")
+        HttpError.not_found("User type not found")
     db.delete(user_type)
     db.commit()

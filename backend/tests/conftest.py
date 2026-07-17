@@ -93,7 +93,10 @@ def client(app, db_session):
 
 
 @pytest.fixture
-def auth_client(client):
+def auth_client(client, db_session):
+    from db.models.user_types import UserTypes
+    from db.models.users import Users
+
     email = f"test-{uuid4().hex}@example.com"
     password = "test-password"
 
@@ -108,6 +111,19 @@ def auth_client(client):
     )
     assert register_resp.status_code == 200
 
+    admin_type = db_session.query(UserTypes).filter(UserTypes.name == "admin").first()
+    if not admin_type:
+        admin_type = UserTypes(name="admin", description="Admin user")
+        db_session.add(admin_type)
+        db_session.commit()
+        db_session.refresh(admin_type)
+
+    user = db_session.query(Users).filter(Users.email == email).first()
+    assert user is not None
+    user.user_type_id = admin_type.id
+    db_session.commit()
+    db_session.refresh(user)
+
     login_resp = client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": password},
@@ -119,7 +135,7 @@ def auth_client(client):
 
 @pytest.fixture
 def admin_client(client, db_session):
-    from app.api.utils.auth import hash_password
+    from core.security import PasswordHasher
     from db.models.user_types import UserTypes
     from db.models.users import Users
 
@@ -144,7 +160,7 @@ def admin_client(client, db_session):
         first_name="Admin",
         last_name="User",
         email=email,
-        password=hash_password(password),
+        password=PasswordHasher.hash(password),
         user_type_id=regular_type.id,
     )
     db_session.add(admin_user)

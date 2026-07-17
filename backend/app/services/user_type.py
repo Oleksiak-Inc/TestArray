@@ -1,5 +1,4 @@
 from db.models.user_types import UserTypes
-from sqlalchemy.orm import Session
 from .utils.service import BaseService
 
 class UserTypeService(BaseService):

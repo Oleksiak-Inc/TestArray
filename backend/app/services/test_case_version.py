@@ -1,9 +1,8 @@
-from db.models.test_suites import TestSuites
 from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import joinedload
 from .utils.service import BaseService
 
 class TestCaseVersionService(BaseService):

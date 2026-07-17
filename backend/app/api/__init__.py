@@ -18,6 +18,11 @@ from .v1 import (
     user_group,
     user_type,
     users,
+    group_memberships,
+    execution_relationship,
+    relation_type,
+    permissions,
+    group_permissions,
 )
 
 api_router = APIRouter()
@@ -40,3 +45,8 @@ api_router.include_router(test_suite.router)
 api_router.include_router(user_group.router)
 api_router.include_router(user_type.router)
 api_router.include_router(users.router)
+api_router.include_router(group_memberships.router)
+api_router.include_router(execution_relationship.router)
+api_router.include_router(relation_type.router)
+api_router.include_router(permissions.router)
+api_router.include_router(group_permissions.router)

@@ -1,10 +1,11 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.schemas.users import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.http_errors import HttpError
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.users import UserService
 
@@ -18,7 +19,7 @@ router = APIRouter(
 @router.get("/", response_model=List[UserOut])
 def list_users(
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("users.read")),
 ):
     """List all users (admin only)."""
     return UserService(db).list_users()
@@ -36,7 +37,7 @@ def update_self(
     if user_in.email and user_in.email != current_user.email:
         existing = UserService(db).get_user_by_email(user_in.email)
         if existing:
-            raise HTTPException(status_code=400, detail="Email already in use")
+            HttpError.bad_request("Email already in use")
     user = UserService(db).update_user(current_user.id, user_in.model_dump(exclude_unset=True))
     return user
 
@@ -54,12 +55,12 @@ def get_self(
 def get_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("users.read")),
 ):
     """Get a user by ID (admin only)."""
     user = UserService(db).get_user_by_id(user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        HttpError.not_found("User not found")
     return user
 
 
@@ -73,7 +74,7 @@ def admin_update_user(
     """Admin updates user fields (group, type, active)."""
     user = UserService(db).update_user(user_id, user_in.model_dump(exclude_unset=True))
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        HttpError.not_found("User not found")
     return user
 
 
@@ -83,9 +84,10 @@ def delete_user(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_admin_user),
 ):
-    """Delete a user (admin only)."""
+    """Delete a user record."""
     user = UserService(db).delete_user(user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        HttpError.not_found("User not found")
+    return None
 
 

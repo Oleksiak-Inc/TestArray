@@ -19,6 +19,4 @@ class ProjectOut(ProjectBase):
     model_config = ConfigDict(from_attributes=True)
 
 class ProjectWithClient(ProjectOut):
-    client_id: int
-
     model_config = ConfigDict(from_attributes=True)

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from db.session import get_db
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from app.services.run import RunService
 from app.schemas.run import *
 
@@ -17,7 +17,7 @@ router = APIRouter(
 def create_run(
     run_in: RunCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("runs.write")),
 ):
     service = RunService(db)
     run = service.create_run(run_in.model_dump())
@@ -28,7 +28,7 @@ def create_run(
 def get_run(
     run_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("runs.read")),
 ):
     run = RunService(db).get_run(run_id)
     if not run:
@@ -40,7 +40,7 @@ def get_run(
 def list_runs_by_project(
     project_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("runs.read")),
 ):
     runs = RunService(db).list_runs_by_project(project_id)
     return runs
@@ -51,7 +51,7 @@ def update_run(
     run_id: int,
     run_in: RunUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("runs.write")),
 ):
     try:
         run = RunService(db).update_run(run_id, run_in.model_dump(exclude_unset=True))

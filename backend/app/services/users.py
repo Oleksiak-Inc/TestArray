@@ -1,7 +1,6 @@
 from db.models.users import Users
-from sqlalchemy.orm import Session
 from .utils.service import BaseService
-from app.api.utils.auth import hash_password
+from core.security import PasswordHasher
 
 class UserService(BaseService):
 
@@ -23,7 +22,7 @@ class UserService(BaseService):
             return None
 
         if "password" in user_data and user_data["password"] is not None:
-            user_data["password"] = hash_password(user_data["password"])
+            user_data["password"] = PasswordHasher.hash(user_data["password"])
         return self.update(user, user_data)
 
     def delete_user(self, user_id: int) -> Users | None:

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.resolution import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.resolution import ResolutionService
 
@@ -18,7 +18,7 @@ router = APIRouter(
 def create_resolution(
     resolution_in: ResolutionCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("resolutions.write")),
 ):
     service = ResolutionService(db)
     return service.create_resolution(resolution_in.model_dump())
@@ -28,7 +28,7 @@ def create_resolution(
 def get_resolution(
     resolution_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("resolutions.read")),
 ):
     resolution = ResolutionService(db).get_resolution(resolution_id)
     if not resolution:
@@ -39,7 +39,7 @@ def get_resolution(
 @router.get("/", response_model=List[ResolutionOut])
 def list_resolutions(
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("resolutions.read")),
 ):
     return ResolutionService(db).list_resolutions()
 
@@ -49,7 +49,7 @@ def update_resolution(
     resolution_id: int,
     resolution_in: ResolutionUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("resolutions.write")),
 ):
     resolution = ResolutionService(db).update_resolution(
         resolution_id, resolution_in.model_dump(exclude_unset=True)

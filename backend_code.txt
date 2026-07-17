@@ -1,568 +1,3 @@
-# File: ./backend/identify_encoding.py
-import os
-for root, _, files in os.walk("."):
-    for f in files:
-        if f.endswith(".py"):
-            path = os.path.join(root, f)
-            try:
-                with open(path, encoding="utf-8") as file:
-                    file.read()
-            except UnicodeDecodeError:
-                print("Bad encoding in:", path)
-
-# File: ./backend/run.py
-import uvicorn
-from app import create_app
-from core.config import settings
-app = create_app()
-print("Starting app on", settings.SERVER_HOST, settings.SERVER_PORT)
-if __name__ == "__main__":
-    uvicorn.run(
-        "run:app",
-        host=settings.SERVER_HOST,
-        port=settings.SERVER_PORT
-    )
-
-# File: ./backend/core/startup.py
-from db.session import SessionLocal
-from db.models.user_types import UserTypes
-def init_db() -> None:
-    """Initialize required reference data.
-    Called on application startup.
-    """
-    db = SessionLocal()
-    try:
-        # Ensure there is at least a "regular" user type for registrations.
-        # Add other base structs here as needed.
-        for name, description in [("admin", "Admin user"),("regular", "Regular user")]:
-            existing = db.query(UserTypes).filter(UserTypes.name == name).first()
-            if not existing:
-                db.add(UserTypes(name=name, description=description))
-        db.commit()
-    finally:
-        db.close()
-
-# File: ./backend/core/config.py
-import os
-from pathlib import Path
-from typing import Optional
-from dotenv import load_dotenv
-from pydantic import AnyUrl, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
-BASE_DIR = Path(__file__).resolve().parent.parent
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
-if ENVIRONMENT == "development":
-    ENV_FILE = BASE_DIR.parent / ".env"
-else:
-    ENV_FILE = BASE_DIR.parent / f".env.{ENVIRONMENT}"
-load_dotenv(ENV_FILE)
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=None,
-        env_file_encoding="utf-8",
-        case_sensitive=True,
-        extra="ignore",
-    )
-    APP_NAME: str = "TestArray"
-    API_V1_STR: str
-    ACCESS_TOKEN_EXPIRE_SECONDS: int = 60 * 60 * 12
-    SERVER_HOST: str
-    SERVER_PORT: int
-    POSTGRES_SERVER: str
-    POSTGRES_PORT: str
-    POSTGRES_DB: str
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    DATABASE_URL: Optional[AnyUrl] = None
-    FRONTEND_ORIGINS: str
-    UPLOAD_DIR: str
-    CHUNK_SIZE: int
-    MAX_FILE_SIZE: int
-    ALLOWED_FILE_EXTENSIONS: set = {
-        ".txt",
-        ".pdf",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".csv",
-        ".json",
-        ".xml",
-    }
-settings = Settings()
-
-# File: ./backend/db/engine.py
-from sqlalchemy import create_engine
-from core.config import settings
-from sqlalchemy.engine import make_url
-database_url = str(settings.DATABASE_URL)
-url = make_url(database_url)
-engine_kwargs = {"future": True}
-if url.drivername.startswith("sqlite"):
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    engine_kwargs.update(
-        pool_size=5,
-        max_overflow=10,
-        pool_timeout=30,
-        pool_recycle=1800,
-        pool_pre_ping=True,
-    )
-engine = create_engine(database_url, **engine_kwargs)
-
-# File: ./backend/db/base.py
-from sqlalchemy.orm import DeclarativeBase
-class Base(DeclarativeBase):
-    pass
-
-# File: ./backend/db/__init__.py
-
-
-# File: ./backend/db/session.py
-from sqlalchemy.orm import sessionmaker, Session
-from db.engine import engine
-from typing import Generator
-SessionLocal = sessionmaker(
-    autocommit=False, 
-    autoflush=False, 
-    bind=engine
-)
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# File: ./backend/db/models/users.py
-from sqlalchemy import Column, Index, Integer, String, Boolean, DateTime, ForeignKey, func
-from sqlalchemy.orm import relationship
-from db.base import Base
-class Users(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
-    user_group_id = Column(Integer, ForeignKey("user_groups.id", use_alter=True), nullable=True)
-    user_type_id = Column(Integer, ForeignKey("user_types.id"), nullable=False)
-    first_name = Column(String, nullable=False)
-    last_name = Column(String, nullable=False)
-    email = Column(String, nullable=False, unique=True)
-    password = Column(String, nullable=False)
-    active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    last_login_at = Column(DateTime(timezone=True))
-    # ---- relationships ----
-    user_type = relationship(
-        "UserTypes", 
-        foreign_keys=[user_type_id], 
-        back_populates="users")
-    user_group = relationship(
-        "UserGroups",
-        foreign_keys=[user_group_id],
-        back_populates="members"
-    )
-    groups_created = relationship(
-        "UserGroups",
-        foreign_keys="UserGroups.created_by_id",
-        back_populates="created_by"
-    )
-    groups_owned = relationship(
-        "UserGroups",
-        foreign_keys="UserGroups.owner_id",
-        back_populates="owner"
-    )
-    uploads = relationship(
-        "Attachments", 
-        foreign_keys="Attachments.uploaded_by", 
-        back_populates="uploader")
-    edits = relationship(
-        "Attachments",
-        foreign_keys="Attachments.edited_by",
-        back_populates="editor"
-    )
-    executions = relationship(
-        "Executions", 
-        foreign_keys="Executions.executed_by", 
-        back_populates="executor")
-    created_test_case_versions = relationship(
-        "TestCaseVersions", 
-        foreign_keys="TestCaseVersions.created_by", 
-        back_populates="creator")
-    sessions = relationship(
-        "Sessions",
-        foreign_keys="Sessions.user_id", 
-        back_populates="user")
-    __table_args__ = (
-        Index("user_user_type_idx", "user_type_id"),
-        Index("user_user_group_idx", "user_group_id"),
-    )
-
-# File: ./backend/db/models/test_suites.py
-from db.base import Base
-from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import relationship
-class TestSuites(Base):
-    __tablename__ = "test_suites"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True)
-    suitcases = relationship(
-        "Suitcases", 
-        back_populates="test_suite",
-        foreign_keys="Suitcases.test_suite_id"
-    )
-
-# File: ./backend/db/models/executions.py
-from sqlalchemy import Column, Index, Integer, Text, DateTime, ForeignKey
-from db.base import Base
-from sqlalchemy.orm import relationship
-class Executions(Base):
-    __tablename__ = "executions"
-    id = Column(Integer, primary_key=True)
-    device_id = Column(Integer, ForeignKey("devices.id"), nullable=False)
-    run_id = Column(Integer, ForeignKey("runs.id"), nullable=False)
-    test_case_version_id = Column(Integer, ForeignKey("test_case_versions.id"), nullable=False)
-    executed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
-    status_id = Column(Integer, ForeignKey("statuses.id"), nullable=True)
-    attachment_id = Column(Integer, ForeignKey("attachments.id"), nullable=True)
-    resolution_id = Column(Integer, ForeignKey("resolutions.id"), nullable=True)
-    actual_result = Column(Text)
-    executed_at = Column(DateTime(timezone=True))
-    execution_order = Column(Integer, nullable=False)
-    device = relationship("Devices", back_populates="executions", foreign_keys=[device_id])
-    run = relationship("Runs", back_populates="executions", foreign_keys=[run_id])
-    test_case_version = relationship("TestCaseVersions", back_populates="executions", foreign_keys=[test_case_version_id])
-    executor = relationship("Users", foreign_keys=[executed_by], back_populates="executions")
-    status = relationship("Statuses", back_populates="executions", foreign_keys=[status_id])
-    attachment = relationship("Attachments", back_populates="executions", foreign_keys=[attachment_id])
-    resolution = relationship("Resolutions", back_populates="executions", foreign_keys=[resolution_id])
-    __table_args__ = (
-        Index("execution_status_idx", "status_id"),
-        Index("execution_executor_idx", "executed_by"),
-        Index("execution_device_idx", "device_id"),
-        Index("execution_attachment_idx", "attachment_id"),
-        Index("execution_run_idx", "run_id"),
-        Index("execution_test_case_version_idx", "test_case_version_id"),
-    )
-
-# File: ./backend/db/models/scenarios.py
-from sqlalchemy import Column, Index, Integer, String
-from db.base import Base
-from sqlalchemy.orm import relationship
-class Scenarios(Base):
-    __tablename__ = "scenarios"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True)
-    test_cases = relationship("TestCases", back_populates="scenario", foreign_keys="TestCases.scenario_id")
-
-# File: ./backend/db/models/status_sets.py
-from sqlalchemy import Column, Index, Integer, String
-from db.base import Base
-from sqlalchemy.orm import relationship
-class StatusSets(Base):
-    __tablename__ = "status_sets"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True)
-    statuses = relationship(
-        "Statuses",
-        back_populates="status_set",
-        foreign_keys="Statuses.status_set_id"
-    )
-    test_cases = relationship(
-        "TestCases",
-        back_populates="status_set",
-        foreign_keys="TestCases.status_set_id"
-    )
-
-# File: ./backend/db/models/sessions.py
-from db.base import Base
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index, func
-from sqlalchemy.orm import relationship
-class Sessions(Base):
-    __tablename__ = "sessions"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    token = Column(String, nullable=False, unique=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    user = relationship(
-        "Users",
-        foreign_keys=[user_id], 
-        back_populates="sessions")
-    __table_args__ = (
-        Index("session_user_id_idx", "user_id"),
-        Index("session_token_idx", "token"),
-    )
-
-# File: ./backend/db/models/test_cases.py
-from sqlalchemy import Column, Index, Integer, ForeignKey
-from db.base import Base
-from sqlalchemy.orm import relationship
-class TestCases(Base):
-    __tablename__ = "test_cases"
-    id = Column(Integer, primary_key=True)
-    scenario_id = Column(Integer, ForeignKey("scenarios.id"), nullable=False)
-    status_set_id = Column(Integer, ForeignKey("status_sets.id"), nullable=False)
-    scenario = relationship("Scenarios", back_populates="test_cases", foreign_keys=[scenario_id])
-    status_set = relationship("StatusSets", back_populates="test_cases", foreign_keys=[status_set_id])
-    versions = relationship("TestCaseVersions", back_populates="test_case", foreign_keys="TestCaseVersions.test_case_id")
-    suitcases = relationship("Suitcases", back_populates="test_case", foreign_keys="Suitcases.test_case_id")
-    __table_args__ = (
-        Index("test_case_scenario_idx", "scenario_id"),
-        Index("test_case_status_set_idx", "status_set_id"),
-    )
-
-# File: ./backend/db/models/__init__.py
-from .users import Users
-from .projects import Projects
-from .devices import Devices
-from .clients import Clients
-from .attachments import Attachments
-from .resolutions import Resolutions
-from .executions import Executions
-from .runs import Runs
-from .test_cases import TestCases
-from .test_case_versions import TestCaseVersions
-from .test_suites import TestSuites
-from .suitcases import Suitcases
-from .statuses import Statuses
-from .status_sets import StatusSets
-from .scenarios import Scenarios
-from .user_groups import UserGroups
-from .user_types import UserTypes
-from .sessions import Sessions
-
-# File: ./backend/db/models/projects.py
-from sqlalchemy import Column, Index, Integer, String, ForeignKey
-from db.base import Base
-from sqlalchemy.orm import relationship
-class Projects(Base):
-    __tablename__ = "projects"
-    id = Column(Integer, primary_key=True)
-    name = Column(String)
-    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
-    client = relationship("Clients", back_populates="projects", foreign_keys=[client_id])
-    devices = relationship("Devices", back_populates="project", foreign_keys="Devices.project_id")
-    runs = relationship("Runs", back_populates="project", foreign_keys="Runs.project_id")
-    __table_args__ = (
-        Index("project_name_idx", "name"),
-    )
-
-# File: ./backend/db/models/test_case_versions.py
-from sqlalchemy import Column, Index, Integer, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
-from db.base import Base
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-class TestCaseVersions(Base):
-    __tablename__ = "test_case_versions"
-    id = Column(Integer, primary_key=True)
-    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    release_ready = Column(Boolean, default=False)
-    version = Column(Integer, nullable=False)
-    name = Column(String)
-    description = Column(Text)
-    steps = Column(Text)
-    expected_result = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    test_case = relationship("TestCases", back_populates="versions", foreign_keys=[test_case_id])
-    creator = relationship("Users", foreign_keys=[created_by], back_populates="created_test_case_versions")
-    executions = relationship("Executions", back_populates="test_case_version", foreign_keys="Executions.test_case_version_id")
-    __table_args__ = (
-        UniqueConstraint("test_case_id", "version", name="test_case_version_unique"),
-        Index("test_case_version_test_case_idx", "test_case_id"),
-        Index("test_case_version_created_at_idx", "created_at"),
-        Index("test_case_version_created_by_idx", "created_by"),
-    )
-
-# File: ./backend/db/models/devices.py
-from sqlalchemy import Column, Index, Integer, String, ForeignKey
-from db.base import Base
-from sqlalchemy.orm import relationship
-class Devices(Base):
-    __tablename__ = "devices"
-    id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
-    name_external = Column(String)
-    name_internal = Column(String)
-    cpu = Column(String)
-    gpu = Column(String)
-    ram = Column(String)
-    project = relationship("Projects", back_populates="devices", foreign_keys=[project_id])
-    executions = relationship("Executions", back_populates="device", foreign_keys="Executions.device_id")
-    __table_args__ = (
-        Index("device_project_idx", "project_id"),
-    )
-
-# File: ./backend/db/models/attachments.py
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, Index
-from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
-from db.base import Base
-class Attachments(Base):
-    __tablename__ = "attachments"
-    id = Column(Integer, primary_key=True)
-    parent_attachment_id = Column(Integer, ForeignKey("attachments.id"), nullable=True)
-    uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    #resolution_id = Column(Integer, ForeignKey("resolutions.id"), nullable=True)
-    edited_by = Column(Integer, ForeignKey("users.id"), nullable=True)
-    filename = Column(String)
-    relative_path = Column(String)
-    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
-    edited_at = Column(DateTime(timezone=True), onupdate=func.now())
-    #presentmon_version = Column(String)
-    #settings = Column(JSON)
-    parent = relationship(
-        "Attachments",
-        remote_side=[id],
-        backref="children"
-    )
-    uploader = relationship("Users", back_populates="uploads", foreign_keys=[uploaded_by])
-    editor = relationship("Users", back_populates="edits", foreign_keys=[edited_by])
-    #resolution = relationship("Resolutions", back_populates="attachments", foreign_keys=[resolution_id])
-    executions = relationship("Executions", back_populates="attachment", foreign_keys="Executions.attachment_id")
-    __table_args__ = (
-        Index("attachment_parent_idx", "parent_attachment_id"),
-        Index("attachment_uploaded_by_idx", "uploaded_by"),
-        Index("attachment_edited_by_idx", "edited_by"),
-        Index("attachment_filename_idx", "filename"),
-        Index("attachment_uploaded_at_idx", "uploaded_at"),
-        Index("attachment_edited_at_idx", "edited_at"),
-        #Index("attachment_resolution_idx", "resolution_id"),
-    )
-
-# File: ./backend/db/models/statuses.py
-from sqlalchemy import Column, Index, Integer, String, Text, ForeignKey
-from db.base import Base
-from sqlalchemy.orm import relationship
-class Statuses(Base):
-    __tablename__ = "statuses"
-    id = Column(Integer, primary_key=True)
-    status_set_id = Column(Integer, ForeignKey("status_sets.id"), nullable=False)
-    name = Column(String, nullable=False)
-    description = Column(Text)
-    status_set = relationship("StatusSets", back_populates="statuses", foreign_keys=[status_set_id])
-    executions = relationship("Executions", back_populates="status", foreign_keys="Executions.status_id")
-    __table_args__ = (
-        Index("status_name_idx", "name"),
-        Index("status_status_set_idx", "status_set_id"),
-    )
-
-# File: ./backend/db/models/runs.py
-from sqlalchemy import Column, Index, Integer, String, DateTime, Text, ForeignKey
-from db.base import Base
-from sqlalchemy.orm import relationship
-class Runs(Base):
-    __tablename__ = "runs"
-    id = Column(Integer, primary_key=True)
-    name = Column(String)
-    started_at = Column(DateTime(timezone=True))
-    done_at = Column(DateTime(timezone=True))
-    test_suite_metadata = Column(Text)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
-    project = relationship("Projects", back_populates="runs", foreign_keys=[project_id])
-    executions = relationship("Executions", back_populates="run", foreign_keys="Executions.run_id")
-    __table_args__ = (
-        Index("run_name_idx", "name"),
-        Index("run_project_idx", "project_id"),
-    )
-
-# File: ./backend/db/models/suitcases.py
-from sqlalchemy import Column, ForeignKey, Index, Integer, UniqueConstraint
-from db.base import Base
-from sqlalchemy.orm import relationship
-class Suitcases(Base):
-    __tablename__ = "suitcases"
-    id = Column(Integer, primary_key=True)
-    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
-    test_suite_id = Column(Integer, ForeignKey("test_suites.id"), nullable=False)
-    test_case = relationship("TestCases", back_populates="suitcases", foreign_keys=[test_case_id])
-    test_suite = relationship("TestSuites", back_populates="suitcases", foreign_keys=[test_suite_id])
-    __table_args__ = (
-        UniqueConstraint("test_case_id", "test_suite_id"),
-        Index("suitcase_test_case_idx", "test_case_id"),
-        Index("suitcase_test_suite_idx", "test_suite_id"),
-    )
-
-# File: ./backend/db/models/user_types.py
-from sqlalchemy import Column, Index, Integer, String, Text
-from db.base import Base
-from sqlalchemy.orm import relationship
-class UserTypes(Base):
-    __tablename__ = "user_types"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)
-    description = Column(Text)
-    # ---- relationships ----
-    users = relationship(
-        "Users",
-        foreign_keys="Users.user_type_id",
-        back_populates="user_type"
-    )
-
-# File: ./backend/db/models/resolutions.py
-from sqlalchemy import Column, Integer, UniqueConstraint
-from db.base import Base
-from sqlalchemy.orm import relationship
-class Resolutions(Base):
-    __tablename__ = "resolutions"
-    id = Column(Integer, primary_key=True)
-    h = Column(Integer, nullable=False)
-    w = Column(Integer, nullable=False)
-    executions = relationship(
-        "Executions",
-        back_populates="resolution",
-        foreign_keys="Executions.resolution_id"
-    )
-    __table_args__ = (
-        UniqueConstraint("h", "w", name="resolutions_hw_unique"),
-    )
-
-# File: ./backend/db/models/clients.py
-from sqlalchemy import Column, Index, Integer, String
-from db.base import Base
-from sqlalchemy.orm import relationship
-class Clients(Base):
-    __tablename__ = "clients"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False) 
-    projects = relationship(
-        "Projects",
-        back_populates="client",
-        foreign_keys="Projects.client_id"
-    )
-
-# File: ./backend/db/models/user_groups.py
-from sqlalchemy import Column, Index, Integer, String, ForeignKey
-from sqlalchemy.orm import relationship
-from db.base import Base
-class UserGroups(Base):
-    __tablename__ = "user_groups"
-    id = Column(Integer, primary_key=True)
-    # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
-    created_by_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
-    owner_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
-    name = Column(String, unique=True)
-    # ---- relationships ----
-    created_by = relationship(
-        "Users",
-        foreign_keys=[created_by_id],
-        back_populates="groups_created"
-    )
-    owner = relationship(
-        "Users",
-        foreign_keys=[owner_id],
-        back_populates="groups_owned"
-    )
-    members = relationship(
-        "Users",
-        foreign_keys="Users.user_group_id",
-        back_populates="user_group"
-    )
-    __table_args__ = (
-        Index("user_group_owner_idx", "owner_id"),
-        Index("user_group_created_by_idx", "created_by_id"),
-    )
-
 # File: ./backend/app/__init__.py
 from os import getenv
 from contextlib import asynccontextmanager
@@ -571,36 +6,19 @@ from core.config import settings
 from core.startup import init_db
 from app.api import api_router
 from starlette.middleware.cors import CORSMiddleware
-FRONTEND_ORIGINS = getenv("FRONTEND_ORIGINS", "").split(",")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic
     init_db()
     yield
-    # Shutdown logic (if any) would go here
 def create_app() -> FastAPI:
-    app = FastAPI(
-        title=settings.APP_NAME,
-        version="1.0.0",
-        docs_url=f"{settings.API_V1_STR}/docs",
-        redoc_url=f"{settings.API_V1_STR}/redoc",
-        openapi_url=f"{settings.API_V1_STR}/openapi.json",
-        lifespan=lifespan,                     # ✅ modern approach
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=FRONTEND_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    frontend_origins = settings.FRONTEND_ORIGINS.split(',')
+    app = FastAPI(title=settings.APP_NAME, version='1.0.0', docs_url=f'{settings.API_V1_STR}/docs', redoc_url=f'{settings.API_V1_STR}/redoc', openapi_url=f'{settings.API_V1_STR}/openapi.json', lifespan=lifespan)
+    app.add_middleware(CORSMiddleware, allow_origins=frontend_origins, allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
     app.include_router(api_router, prefix=settings.API_V1_STR)
     return app
 
 # File: ./backend/app/services/auth.py
-from sqlalchemy.orm import Session
 from db.models.users import Users
-from db.models.sessions import Sessions as UserSessions
 from app.api.utils.auth import hash_password, verify_password
 from datetime import datetime, timedelta, timezone
 from core.config import settings
@@ -608,18 +26,19 @@ from app.services.users import UserService
 from app.services.session import SessionService
 from app.services.user_type import UserTypeService
 from .utils.service import BaseService
+from app.api.utils.security import PasswordHasher
 class AuthService(BaseService):
     def login_user(self, email: str, password: str):
         user = UserService(self.db).get_user_by_email(email)
         if not user:
             return None
-        if not verify_password(password, user.password):
+        if not PasswordHasher.verify(password, user.password):
             return None
         now = datetime.now(timezone.utc)
         exp = now + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
         session_secret = SessionService(self.db).create_session(user.id, exp, now)
-        self.update(user, {"last_login_at": now})
-        return {"user": user, "access_token": session_secret}
+        self.update(user, {'last_login_at': now})
+        return {'user': user, 'access_token': session_secret, 'expires_at': exp.timestamp()}
     def validate_session(self, session_secret: str):
         session = SessionService(self.db).get_session(session_secret=session_secret)
         if not session:
@@ -636,22 +55,13 @@ class AuthService(BaseService):
         return True
     def register_user(self, first_name: str, last_name: str, email: str, password: str):
         existing_user = self.db.query(Users).filter(Users.email == email).first()
-        regular_user_type = UserTypeService(self.db).get_user_type_by_name("regular")
+        regular_user_type = UserTypeService(self.db).get_user_type_by_name('regular')
         if existing_user:
             return None
         if not regular_user_type:
             return None
-        hashed_password = hash_password(password)
-        return self.create(
-            Users,
-            {
-                "first_name": first_name,
-                "last_name": last_name,
-                "email": email,
-                "password": hashed_password,
-                "user_type_id": regular_user_type.id,
-            },
-        )
+        hashed_password = PasswordHasher.hash(password)
+        return self.create(Users, {'first_name': first_name, 'last_name': last_name, 'email': email, 'password': hashed_password, 'user_type_id': regular_user_type.id})
     def logout_user(self, session_secret: str):
         session = SessionService(self.db).delete_session(session_secret)
         if not session:
@@ -661,15 +71,16 @@ class AuthService(BaseService):
 # File: ./backend/app/services/execution.py
 from datetime import datetime, timezone
 from typing import Any
-from sqlalchemy.orm import joinedload
 from db.models.attachments import Attachments
 from db.models.devices import Devices
 from db.models.executions import Executions
+from db.models.resolutions import Resolutions
 from db.models.runs import Runs
 from db.models.statuses import Statuses
 from db.models.suitcases import Suitcases
-from db.models.test_case_versions import TestCaseVersions
 from db.models.test_suites import TestSuites
+from db.models.user_types import UserTypes
+from db.models.users import Users
 from app.services.test_case_version import TestCaseVersionService
 from .utils.service import BaseService
 class ExecutionService(BaseService):
@@ -684,51 +95,32 @@ class ExecutionService(BaseService):
     def create_executions_for_test_suite(self, *, test_suite_id: int, run_id: int, device_ids: list[int]):
         test_suite = self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).first()
         if not test_suite:
-            raise ValueError("Test suite not found")
+            raise ValueError('Test suite not found')
         run = self.db.query(Runs).filter(Runs.id == run_id).first()
         if not run:
-            raise ValueError("Run not found")
+            raise ValueError('Run not found')
         devices = self.db.query(Devices).filter(Devices.id.in_(device_ids)).all()
+        if len(device_ids) != len(set(device_ids)):
+            raise ValueError('Duplicate device IDs are not allowed')
         if len(devices) != len(set(device_ids)):
-            raise ValueError("One or more devices were not found")
+            raise ValueError('One or more devices were not found')
         for device in devices:
             if device.project_id != run.project_id:
-                raise ValueError("Device does not belong to the selected run project")
-        suitcases = (
-            self.db.query(Suitcases)
-            .filter(Suitcases.test_suite_id == test_suite_id)
-            .order_by(Suitcases.id)
-            .all()
-        )
+                raise ValueError('Device does not belong to the selected run project')
+        suitcases = self.db.query(Suitcases).filter(Suitcases.test_suite_id == test_suite_id).order_by(Suitcases.id).all()
         if not suitcases:
-            raise ValueError("The selected test suite has no test cases")
+            raise ValueError('The selected test suite has no test cases')
         created: list[Executions] = []
         execution_order = 1
         for suitcase in suitcases:
             version = self._get_latest_test_case_version(suitcase.test_case_id)
             if not version:
-                raise ValueError(f"Test case {suitcase.test_case_id} has no version available")
+                raise ValueError(f'Test case {suitcase.test_case_id} has no version available')
             for device in devices:
-                existing = self.get_one(
-                    Executions,
-                    run_id=run_id,
-                    device_id=device.id,
-                    test_case_version_id=version.id,
-                )
+                existing = self.get_one(Executions, run_id=run_id, device_id=device.id, test_case_version_id=version.id)
                 if existing:
                     continue
-                execution = Executions(
-                    device_id=device.id,
-                    run_id=run_id,
-                    test_case_version_id=version.id,
-                    executed_by=None,
-                    status_id=None,
-                    attachment_id=None,
-                    resolution_id=None,
-                    actual_result=None,
-                    executed_at=None,
-                    execution_order=execution_order,
-                )
+                execution = Executions(device_id=device.id, run_id=run_id, test_case_version_id=version.id, executed_by=None, status_id=None, attachment_id=None, resolution_id=None, actual_result=None, executed_at=None, execution_order=execution_order)
                 self.add(execution)
                 created.append(execution)
                 execution_order += 1
@@ -738,69 +130,100 @@ class ExecutionService(BaseService):
         execution = self.db.query(Executions).filter(Executions.id == execution_id).first()
         if not execution:
             return None
-        test_case_version = TestCaseVersionService(self.db).get_test_case_version_with_test_case(
-            execution.test_case_version_id
-        )
+        test_case_version = TestCaseVersionService(self.db).get_test_case_version_with_test_case(execution.test_case_version_id)
         update_payload = dict(execution_data)
-        update_payload.pop("executed_by", None)
-        update_payload.pop("executed_at", None)
-        if "status_id" in update_payload and update_payload["status_id"] is not None:
-            allowed_status_ids = {
-                status.id
-                for status in self.db.query(Statuses).filter(
-                    Statuses.status_set_id == test_case_version.test_case.status_set_id
-                ).all()
-            }
-            if update_payload["status_id"] not in allowed_status_ids:
-                raise ValueError("Status is not allowed for this execution")
-            update_payload["executed_by"] = getattr(current_user, "id", current_user)
-            update_payload["executed_at"] = datetime.now(timezone.utc)
-        if "attachment_id" in update_payload and update_payload["attachment_id"] is not None:
-            attachment = self.db.query(Attachments).filter(Attachments.id == update_payload["attachment_id"]).first()
+        update_payload.pop('executed_by', None)
+        update_payload.pop('executed_at', None)
+        update_payload.pop('updated_by', None)
+        update_payload.pop('updated_at', None)
+        if update_payload:
+            update_payload['updated_by'] = getattr(current_user, 'id', current_user)
+            update_payload['updated_at'] = datetime.now(timezone.utc)
+        if 'status_id' in update_payload and update_payload['status_id'] is not None:
+            allowed_status_ids = {status.id for status in self.db.query(Statuses).filter(Statuses.status_set_id == test_case_version.test_case.status_set_id).all()}
+            if update_payload['status_id'] not in allowed_status_ids:
+                raise ValueError('Status is not allowed for this execution')
+            update_payload['executed_by'] = getattr(current_user, 'id', current_user)
+            update_payload['executed_at'] = datetime.now(timezone.utc)
+        if 'attachment_id' in update_payload and update_payload['attachment_id'] is not None:
+            attachment = self.db.query(Attachments).filter(Attachments.id == update_payload['attachment_id']).first()
             if not attachment:
-                raise ValueError("Attachment not found")
-        return self.update(execution, update_payload)
+                raise ValueError('Attachment not found')
+        if 'resolution_id' in update_payload and update_payload['resolution_id'] is not None:
+            resolution = self.db.query(Resolutions).filter(Resolutions.id == update_payload['resolution_id']).first()
+            if not resolution:
+                raise ValueError('Resolution not found')
+        updated_execution = self.update(execution, update_payload)
+        if updated_execution and updated_execution.status_id is not None:
+            run = self.db.query(Runs).filter(Runs.id == updated_execution.run_id).first()
+            if run and run.done_at is None:
+                related_executions = self.db.query(Executions).filter(Executions.run_id == run.id).all()
+                if all((item.status_id is not None for item in related_executions)):
+                    run.done_at = datetime.now(timezone.utc)
+                    self.commit()
+        return updated_execution
     def delete_execution(self, execution_id: int):
         execution = self.get_execution(execution_id)
         if not execution:
             return None
         return self.delete(execution)
+    def assign_execution(self, execution_id: int, user_id: int):
+        execution = self.get_execution(execution_id)
+        if not execution:
+            return None
+        user = self.db.query(Users).filter(Users.id == user_id).first()
+        if not user:
+            return None
+        execution.assigned_to = user_id
+        self.commit()
+        return execution
+    def assign_executions_bulk(self, execution_ids: list[int], user_id: int):
+        user = self.db.query(Users).filter(Users.id == user_id).first()
+        if not user:
+            return None
+        executions = self.db.query(Executions).filter(Executions.id.in_(execution_ids)).all()
+        if len(executions) != len(execution_ids):
+            return None
+        for execution in executions:
+            execution.assigned_to = user_id
+        self.commit()
+        return executions
+    def start_execution(self, execution_id: int, current_user: Any):
+        execution = self.get_execution(execution_id)
+        if not execution:
+            return None
+        admin_type = self.db.query(UserTypes).filter(UserTypes.name == 'admin').first()
+        is_admin = admin_type is not None and current_user.user_type_id == admin_type.id
+        if not is_admin and execution.assigned_to != current_user.id:
+            raise ValueError('Only the assigned user or an admin can start this execution')
+        if execution.started_at is not None:
+            raise ValueError('Execution has already been started')
+        execution.started_at = datetime.now(timezone.utc)
+        self.commit()
+        return execution
 
 # File: ./backend/app/services/test_case_version.py
-from db.models.test_suites import TestSuites
 from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import joinedload
 from .utils.service import BaseService
 class TestCaseVersionService(BaseService):
     def get_test_case_version(self, test_case_version_id: int):
         return self.get_by_id(TestCaseVersions, test_case_version_id)
     def get_test_case_version_with_test_case(self, test_case_version_id: int):
-        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
-            joinedload(TestCaseVersions.test_case)
-        ).first()
+        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(joinedload(TestCaseVersions.test_case)).first()
     def get_test_case_version_with_test_case_with_test_suites(self, test_case_version_id: int):
-        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(
-            joinedload(TestCaseVersions.test_case).joinedload(TestCases.suitcases).joinedload(Suitcases.test_suite)
-        ).first()
+        return self.db.query(TestCaseVersions).filter(TestCaseVersions.id == test_case_version_id).options(joinedload(TestCaseVersions.test_case).joinedload(TestCases.suitcases).joinedload(Suitcases.test_suite)).first()
     def get_test_case_version_by_test_case_id(self, test_case_id: int):
         return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id).first()
     def get_latest_release_ready_test_case_version_by_test_case_id(self, test_case_id: int):
-        return self.db.query(TestCaseVersions).filter(
-            TestCaseVersions.test_case_id == test_case_id,
-            TestCaseVersions.release_ready == True
-        ).order_by(TestCaseVersions.created_at.desc()).first()
+        return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id, TestCaseVersions.release_ready == True).order_by(TestCaseVersions.created_at.desc()).first()
     def get_latest_test_case_version_by_test_case_id(self, test_case_id: int):
         version = self.get_latest_release_ready_test_case_version_by_test_case_id(test_case_id)
         if version:
             return version
-        return (
-            self.db.query(TestCaseVersions)
-            .filter(TestCaseVersions.test_case_id == test_case_id)
-            .order_by(TestCaseVersions.created_at.desc(), TestCaseVersions.version.desc())
-            .first()
-        )
+        return self.db.query(TestCaseVersions).filter(TestCaseVersions.test_case_id == test_case_id).order_by(TestCaseVersions.created_at.desc(), TestCaseVersions.version.desc()).first()
     def create_test_case_version(self, test_case_version_data):
         return self.create(TestCaseVersions, test_case_version_data)
     def list_test_case_versions_by_test_case(self, test_case_id: int):
@@ -818,9 +241,8 @@ class TestCaseVersionService(BaseService):
 
 # File: ./backend/app/services/users.py
 from db.models.users import Users
-from sqlalchemy.orm import Session
 from .utils.service import BaseService
-from app.api.utils.auth import hash_password
+from app.api.utils.security import PasswordHasher
 class UserService(BaseService):
     def get_user_by_email(self, email: str):
         user = self.db.query(Users).filter(Users.email == email).first()
@@ -835,8 +257,8 @@ class UserService(BaseService):
         user = self.get_user_by_id(user_id)
         if not user:
             return None
-        if "password" in user_data and user_data["password"] is not None:
-            user_data["password"] = hash_password(user_data["password"])
+        if 'password' in user_data and user_data['password'] is not None:
+            user_data['password'] = PasswordHasher.hash(user_data['password'])
         return self.update(user, user_data)
     def delete_user(self, user_id: int) -> Users | None:
         user = self.get_user_by_id(user_id)
@@ -851,9 +273,7 @@ class ResolutionService(BaseService):
     def get_resolution(self, resolution_id: int):
         return self.get_by_id(Resolutions, resolution_id)
     def get_resolution_by_hw(self, h: int, w: int):
-        return self.db.query(Resolutions).filter(
-            Resolutions.h == h, Resolutions.w == w
-        ).first()
+        return self.db.query(Resolutions).filter(Resolutions.h == h, Resolutions.w == w).first()
     def list_resolutions(self):
         return self.db.query(Resolutions).all()
     def create_resolution(self, resolution_data: dict):
@@ -875,91 +295,42 @@ from sqlalchemy.orm import joinedload
 from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
 from db.models.test_case_versions import TestCaseVersions
-from app.services.suitcase import SuitcaseService
 from .utils.service import BaseService
 class TestCaseService(BaseService):
     def get_test_case(self, test_case_id: int):
         return self.get_by_id(TestCases, test_case_id)
     def get_test_case_with_testsuites(self, test_case_id: int):
-        return (
-            self.db.query(TestCases)
-            .filter(TestCases.id == test_case_id)
-            .options(
-                joinedload(TestCases.suitcases)
-                .joinedload(Suitcases.test_suite)
-            )
-            .first()
-        )
+        return self.db.query(TestCases).filter(TestCases.id == test_case_id).options(joinedload(TestCases.suitcases).joinedload(Suitcases.test_suite)).first()
     def get_test_case_with_latest_version(self, test_case_id: int):
-        result = self.db.execute(
-            text("""
-                SELECT DISTINCT ON (tc.id)
-                    tc.id AS test_case_id,
-                    tc.name AS test_case_name,
-                    tcv.id AS version_id,
-                    tcv.created_at,
-                    tcv.release_ready
-                FROM test_cases tc
-                JOIN test_case_versions tcv
-                    ON tcv.test_case_id = tc.id
-                WHERE tc.id = :test_case_id
-                  AND tcv.release_ready = true
-                ORDER BY tc.id, tcv.created_at DESC
-            """),
-            {"test_case_id": test_case_id}
-        ).fetchone()
+        result = self.db.execute(text('\n                SELECT DISTINCT ON (tc.id)\n                    tc.id AS test_case_id,\n                    tcv.name AS test_case_name,\n                    tcv.id AS version_id,\n                    tcv.created_at,\n                    tcv.release_ready\n                FROM test_cases tc\n                JOIN test_case_versions tcv\n                    ON tcv.test_case_id = tc.id\n                WHERE tc.id = :test_case_id\n                  AND tcv.release_ready = true\n                ORDER BY tc.id, tcv.created_at DESC\n            '), {'test_case_id': test_case_id}).fetchone()
         return result
     def get_test_case_with_all_versions(self, test_case_id: int):
-        return (
-            self.db.query(TestCases)
-            .filter(TestCases.id == test_case_id)
-            .options(
-                joinedload(TestCases.versions)
-            )
-            .first()
-        )
+        return self.db.query(TestCases).filter(TestCases.id == test_case_id).options(joinedload(TestCases.versions)).first()
     def create_test_case(self, test_case_data):
         return self.create(TestCases, test_case_data)
-    def create_test_case_and_version(self, test_case_data, test_case_version_data, test_suite_id: int = None):
+    def create_test_case_and_version(self, test_case_data, test_case_version_data, test_suite_id: int=None):
         test_case = self.add_and_flush(TestCases(**test_case_data))
-        test_case_version_data["test_case_id"] = test_case.id
+        test_case_version_data['test_case_id'] = test_case.id
         test_case_version = self.add_and_flush(TestCaseVersions(**test_case_version_data))
         if test_suite_id:
             self.add_and_flush(Suitcases(test_case_id=test_case.id, test_suite_id=test_suite_id))
         self.commit()
         self.refresh(test_case)
         self.refresh(test_case_version)
-        return test_case, test_case_version
-    def create_test_cases_and_versions_bulk(
-        self,
-        items: list[dict],   # each dict: test_case_data + test_case_version_data merged
-        created_by: int,
-        test_suite_id: int = None,
-    ) -> list[dict]:
-        VERSION_FIELDS = {"name", "description", "steps", "expected_result", "release_ready"}
-        TEST_CASE_FIELDS = {"scenario_id", "status_set_id"}
+        return (test_case, test_case_version)
+    def create_test_cases_and_versions_bulk(self, items: list[dict], created_by: int, test_suite_id: int=None) -> list[dict]:
+        VERSION_FIELDS = {'name', 'description', 'steps', 'expected_result', 'release_ready'}
+        TEST_CASE_FIELDS = {'scenario_id', 'status_set_id'}
         results = []
         for item in items:
-            # Split the flat dict into its two parts
             tc_data = {k: v for k, v in item.items() if k in TEST_CASE_FIELDS}
             tcv_data = {k: v for k, v in item.items() if k in VERSION_FIELDS}
             test_case = self.add_and_flush(TestCases(**tc_data))
-            tcv_data.update({
-                "test_case_id": test_case.id,
-                "created_by": created_by,
-                "version": 1,
-            })
+            tcv_data.update({'test_case_id': test_case.id, 'created_by': created_by, 'version': 1})
             test_case_version = self.add_and_flush(TestCaseVersions(**tcv_data))
             if test_suite_id:
-                self.add_and_flush(Suitcases(
-                    test_case_id=test_case.id,
-                    test_suite_id=test_suite_id,
-                ))
-            results.append({
-                "test_case_id": test_case.id,
-                "test_case_version_id": test_case_version.id,
-                "version": test_case_version.version,
-            })
+                self.add_and_flush(Suitcases(test_case_id=test_case.id, test_suite_id=test_suite_id))
+            results.append({'test_case_id': test_case.id, 'test_case_version_id': test_case_version.id, 'version': test_case_version.version})
         self.commit()
         return results
     def list_test_cases(self):
@@ -976,17 +347,14 @@ class TestCaseService(BaseService):
         return self.delete(test_case)
 
 # File: ./backend/app/services/client.py
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import joinedload
 from db.models.clients import Clients
-from db.models.projects import Projects
 from .utils.service import BaseService
 class ClientService(BaseService):
     def get_client(self, client_id: int):
         return self.get_by_id(Clients, client_id)
     def get_client_with_projects(self, client_id: int):
-        return self.db.query(Clients).filter(Clients.id == client_id).options(
-            joinedload(Clients.projects)
-        ).first()
+        return self.db.query(Clients).filter(Clients.id == client_id).options(joinedload(Clients.projects)).first()
     def create_client(self, client_data):
         return self.create(Clients, client_data)
     def update_client(self, client_id: int, client_data):
@@ -994,30 +362,80 @@ class ClientService(BaseService):
         if not client:
             return None
         return self.update(client, client_data)
+    def delete_client(self, client_id: int):
+        client = self.get_client(client_id)
+        if not client:
+            return None
+        return self.delete(client)
 
 # File: ./backend/app/services/project.py
-from sqlalchemy.orm import Session, joinedload
-from db.models.clients import Clients
+from sqlalchemy.orm import joinedload
 from db.models.projects import Projects
+from db.models.users import Users
 from .utils.service import BaseService
 class ProjectService(BaseService):
     def get_project(self, project_id: int):
         return self.get_by_id(Projects, project_id)
     def get_project_with_client(self, project_id: int):
-        return self.db.query(Projects).filter(Projects.id == project_id).options(
-            joinedload(Projects.client)
-        ).first()
+        return self.db.query(Projects).filter(Projects.id == project_id).options(joinedload(Projects.client)).first()
     def create_project(self, project_data):
+        if 'owner_id' not in project_data or project_data['owner_id'] is None:
+            owner = self.db.query(Users).order_by(Users.id.asc()).first()
+            if owner is None:
+                owner = Users(first_name='System', last_name='Owner', email='system-owner@example.com', password='placeholder', user_type_id=1)
+                self.db.add(owner)
+                self.db.flush()
+            project_data = dict(project_data)
+            project_data['owner_id'] = owner.id
         return self.create(Projects, project_data)
     def update_project(self, project_id: int, project_data):
         project = self.get_project(project_id)
         if not project:
             return None
         return self.update(project, project_data)
+    def delete_project(self, project_id: int):
+        project = self.get_project(project_id)
+        if not project:
+            return None
+        return self.delete(project)
+
+# File: ./backend/app/services/group_permission.py
+from db.models.group_permissions import GroupPermissions
+from db.models.permissions import Permissions
+from db.models.user_groups import UserGroups
+from .utils.service import BaseService
+class GroupPermissionService(BaseService):
+    def assign_permission(self, group_id: int, permission_id: int) -> GroupPermissions:
+        group = self.db.query(UserGroups).filter(UserGroups.id == group_id).first()
+        if not group:
+            raise ValueError('Group does not exist')
+        perm = self.db.query(Permissions).filter(Permissions.id == permission_id).first()
+        if not perm:
+            raise ValueError('Permission does not exist')
+        existing = self.db.query(GroupPermissions).filter(GroupPermissions.group_id == group_id, GroupPermissions.permission_id == permission_id).first()
+        if existing:
+            raise ValueError('Permission already assigned to group')
+        gp = GroupPermissions(group_id=group_id, permission_id=permission_id)
+        return self.save(gp)
+    def remove_permission(self, group_id: int, permission_id: int) -> bool:
+        gp = self.db.query(GroupPermissions).filter(GroupPermissions.group_id == group_id, GroupPermissions.permission_id == permission_id).first()
+        if not gp:
+            return False
+        self.delete(gp)
+        return True
+    def list_permissions_for_group(self, group_id: int) -> list[Permissions]:
+        group = self.db.query(UserGroups).filter(UserGroups.id == group_id).first()
+        if not group:
+            return []
+        return [gp.permission for gp in group.group_permissions]
+    def list_groups_for_permission(self, permission_id: int) -> list[UserGroups]:
+        perm = self.db.query(Permissions).filter(Permissions.id == permission_id).first()
+        if not perm:
+            return []
+        return [gp.group for gp in perm.group_permissions]
 
 # File: ./backend/app/services/scenario.py
 from db.models.scenarios import Scenarios
-from sqlalchemy.orm import Session
 from .utils.service import BaseService
 class ScenarioService(BaseService):
     def get_scenario(self, scenario_id: int):
@@ -1041,13 +459,14 @@ class ScenarioService(BaseService):
 
 # File: ./backend/app/services/user_type.py
 from db.models.user_types import UserTypes
-from sqlalchemy.orm import Session
 from .utils.service import BaseService
 class UserTypeService(BaseService):
     def get_user_type_by_id(self, user_type_id: int):
         return self.get_by_id(UserTypes, user_type_id)
     def get_user_type_by_name(self, name: str):
         return self.db.query(UserTypes).filter(UserTypes.name == name).first()
+    def list_user_types(self):
+        return self.db.query(UserTypes).all()
     def create_user_type(self, user_type_data):
         return self.create(UserTypes, user_type_data)
     def update_user_type(self, user_type_id, user_type_data):
@@ -1055,14 +474,35 @@ class UserTypeService(BaseService):
         if not user_type:
             return None
         return self.update(user_type, user_type_data)
+    def delete_user_type(self, user_type_id: int):
+        user_type = self.get_user_type_by_id(user_type_id)
+        if not user_type:
+            return None
+        return self.delete(user_type)
+
+# File: ./backend/app/services/permission.py
+from db.models.permissions import Permissions
+from .utils.service import BaseService
+class PermissionService(BaseService):
+    def list_permissions(self):
+        return self.db.query(Permissions).all()
+    def get_permission(self, permission_id: int):
+        return self.get_by_id(Permissions, permission_id)
+    def get_permission_by_code(self, code: str):
+        return self.db.query(Permissions).filter(Permissions.code == code).first()
+    def create_permission(self, data: dict):
+        return self.create(Permissions, data)
+    def delete_permission(self, permission_id: int):
+        perm = self.get_permission(permission_id)
+        if not perm:
+            return None
+        return self.delete(perm)
 
 # File: ./backend/app/services/test_suite.py
 from db.models.test_suites import TestSuites
-from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
-from db.models.test_case_versions import TestCaseVersions
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import select, text
+from sqlalchemy.orm import joinedload
+from sqlalchemy import text
 from .utils.service import BaseService
 class TestSuiteService(BaseService):
     def get_test_suite(self, test_suite_id: int):
@@ -1070,31 +510,9 @@ class TestSuiteService(BaseService):
     def get_test_suite_by_name(self, name: str):
         return self.db.query(TestSuites).filter(TestSuites.name == name).first()
     def get_test_suite_with_test_cases(self, test_suite_id: int):
-        return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).options(
-            joinedload(TestSuites.suitcases).joinedload(Suitcases.test_case)
-        ).first()
+        return self.db.query(TestSuites).filter(TestSuites.id == test_suite_id).options(joinedload(TestSuites.suitcases).joinedload(Suitcases.test_case)).first()
     def get_test_suite_with_test_cases_with_latest_test_case_version(self, test_suite_id: int):
-        return (
-            self.db.execute(
-                text("""
-                    SELECT DISTINCT ON (tc.id)
-                        ts.id AS suite_id,
-                        ts.name AS suite_name,
-                        tc.id AS test_case_id,
-                        tc.name AS test_case_name,
-                        tcv.id AS version_id,
-                        tcv.created_at
-                    FROM test_suites ts
-                    JOIN suitcases sc ON sc.test_suite_id = ts.id
-                    JOIN test_cases tc ON tc.id = sc.test_case_id
-                    JOIN test_case_versions tcv ON tcv.test_case_id = tc.id
-                    WHERE ts.id = :test_suite_id
-                    AND tcv.release_ready = true
-                    ORDER BY tc.id, tcv.created_at DESC
-                """),
-                {"test_suite_id": test_suite_id}
-            ).fetchall()
-        )
+        return self.db.execute(text('\n                    SELECT DISTINCT ON (tc.id)\n                        ts.id AS suite_id,\n                        ts.name AS suite_name,\n                        tc.id AS test_case_id,\n                        tcv.name AS test_case_name,\n                        tcv.id AS version_id,\n                        tcv.created_at\n                    FROM test_suites ts\n                    JOIN suitcases sc ON sc.test_suite_id = ts.id\n                    JOIN test_cases tc ON tc.id = sc.test_case_id\n                    JOIN test_case_versions tcv ON tcv.test_case_id = tc.id\n                    WHERE ts.id = :test_suite_id\n                    AND tcv.release_ready = true\n                    ORDER BY tc.id, tcv.created_at DESC\n                '), {'test_suite_id': test_suite_id}).fetchall()
     def create_test_suite(self, test_suite_data):
         return self.create(TestSuites, test_suite_data)
     def update_test_suite(self, test_suite_id, test_suite_data):
@@ -1111,8 +529,8 @@ class TestSuiteService(BaseService):
         return self.delete(test_suite)
 
 # File: ./backend/app/services/run.py
-from sqlalchemy.orm import Session, joinedload
-from db.models.clients import Clients
+from sqlalchemy.orm import joinedload
+from db.models.executions import Executions
 from db.models.projects import Projects
 from db.models.runs import Runs
 from .utils.service import BaseService
@@ -1120,13 +538,9 @@ class RunService(BaseService):
     def get_run(self, run_id):
         return self.get_by_id(Runs, run_id)
     def get_run_with_project(self, run_id):
-        return self.db.query(Runs).filter(Runs.id == run_id).options(
-            joinedload(Runs.project)
-        ).first()
+        return self.db.query(Runs).filter(Runs.id == run_id).options(joinedload(Runs.project)).first()
     def get_run_with_project_and_client(self, run_id):
-        return self.db.query(Runs).filter(Runs.id == run_id).options(
-            joinedload(Runs.project).joinedload(Projects.client)
-        ).first()
+        return self.db.query(Runs).filter(Runs.id == run_id).options(joinedload(Runs.project).joinedload(Projects.client)).first()
     def list_runs_by_project(self, project_id):
         return self.db.query(Runs).filter(Runs.project_id == project_id).all()
     def create_run(self, run_data):
@@ -1135,6 +549,10 @@ class RunService(BaseService):
         run = self.get_run(run_id)
         if not run:
             return None
+        if 'done_at' in run_data and run_data['done_at'] is not None:
+            related_executions = self.db.query(Executions).filter(Executions.run_id == run_id).all()
+            if not all((item.status_id is not None for item in related_executions)):
+                raise ValueError('Cannot mark a run as done before all executions have a status')
         return self.update(run, run_data)
     def delete_run(self, run_id):
         run = self.get_run(run_id)
@@ -1143,30 +561,13 @@ class RunService(BaseService):
         return self.delete(run)
 
 # File: ./backend/app/services/suitcase.py
-from sqlalchemy import text
-from sqlalchemy.orm import joinedload
-from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
-from db.models.test_case_versions import TestCaseVersions
 from .utils.service import BaseService
 class SuitcaseService(BaseService):
     def create_suitcase(self, suitcase_data: dict) -> Suitcases:
         return self.create(Suitcases, suitcase_data)
-    def create_suitcases_bulk(
-        self,
-        test_suite_id: int,
-        test_case_ids: list[int],
-    ) -> dict:
-        # Fetch already-linked test case ids for this suite in one query
-        existing_ids = {
-            row.test_case_id
-            for row in self.db.query(Suitcases.test_case_id)
-            .filter(
-                Suitcases.test_suite_id == test_suite_id,
-                Suitcases.test_case_id.in_(test_case_ids),
-            )
-            .all()
-        }
+    def create_suitcases_bulk(self, test_suite_id: int, test_case_ids: list[int]) -> dict:
+        existing_ids = {row.test_case_id for row in self.db.query(Suitcases.test_case_id).filter(Suitcases.test_suite_id == test_suite_id, Suitcases.test_case_id.in_(test_case_ids)).all()}
         created = []
         skipped = []
         for tc_id in test_case_ids:
@@ -1178,7 +579,7 @@ class SuitcaseService(BaseService):
         self.commit()
         for s in created:
             self.refresh(s)
-        return {"created": created, "skipped_duplicate_test_case_ids": skipped}
+        return {'created': created, 'skipped_duplicate_test_case_ids': skipped}
     def get_suitcase(self, suitcase_id: int):
         return self.db.query(Suitcases).filter(Suitcases.id == suitcase_id).first()
     def get_suitcases_by_test_case_id(self, test_case_id: int):
@@ -1186,10 +587,7 @@ class SuitcaseService(BaseService):
     def get_suitcases_by_test_suite_id(self, test_suite_id: int):
         return self.db.query(Suitcases).filter(Suitcases.test_suite_id == test_suite_id).all()
     def get_suitcases_by_test_case_and_test_suite_id(self, test_case_id: int, test_suite_id: int):
-        return self.db.query(Suitcases).filter(
-            Suitcases.test_case_id == test_case_id,
-            Suitcases.test_suite_id == test_suite_id
-        ).all()
+        return self.db.query(Suitcases).filter(Suitcases.test_case_id == test_case_id, Suitcases.test_suite_id == test_suite_id).all()
     def update_suitcase(self, suitcase_id: int, suitcase_data):
         suitcase = self.get_suitcase(suitcase_id)
         if not suitcase:
@@ -1208,9 +606,7 @@ class StatusService(BaseService):
     def get_status(self, status_id: int):
         return self.get_by_id(Statuses, status_id)
     def list_statuses_by_status_set(self, status_set_id: int):
-        return self.db.query(Statuses).filter(
-            Statuses.status_set_id == status_set_id
-        ).all()
+        return self.db.query(Statuses).filter(Statuses.status_set_id == status_set_id).all()
     def list_all_statuses(self):
         return self.db.query(Statuses).all()
     def create_status(self, status_data: dict):
@@ -1238,8 +634,12 @@ from fastapi import UploadFile
 from typing import List, Union
 def get_date_subdir() -> Path:
     now = datetime.now()
-    return Path(str(now.year)) / f"{now.month:02}" / f"{now.day:02}"
+    return Path(str(now.year)) / f'{now.month:02}' / f'{now.day:02}'
 class AttachmentService(BaseService):
+    def get_attachment(self, attachment_id: int):
+        return self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
+    def list_attachments(self):
+        return self.db.query(Attachments).order_by(Attachments.uploaded_at.desc()).all()
     async def save_file(self, file: UploadFile, uploaded_by: int, **kwargs) -> Union[Attachments, None]:
         ext = Path(file.filename).suffix
         if ext not in settings.ALLOWED_FILE_EXTENSIONS:
@@ -1247,12 +647,12 @@ class AttachmentService(BaseService):
         date_dir = get_date_subdir()
         full_dir = Path(settings.UPLOAD_DIR) / date_dir
         full_dir.mkdir(parents=True, exist_ok=True)
-        stored_name = f"{uuid4()}{ext}"
+        stored_name = f'{uuid4()}{ext}'
         dest = full_dir / stored_name
         total_bytes = 0
         try:
-            async with aiofiles.open(dest, "wb") as f:
-                while chunk := await file.read(settings.CHUNK_SIZE):
+            async with aiofiles.open(dest, 'wb') as f:
+                while (chunk := (await file.read(settings.CHUNK_SIZE))):
                     total_bytes += len(chunk)
                     if total_bytes > settings.MAX_FILE_SIZE:
                         await f.close()
@@ -1263,13 +663,7 @@ class AttachmentService(BaseService):
             if dest.exists():
                 dest.unlink(missing_ok=True)
             return None
-        attachment = Attachments(
-            filename=file.filename,
-            relative_path=str(date_dir / stored_name),
-            uploaded_by=uploaded_by,
-            uploaded_at=datetime.now(),
-            **kwargs
-        )
+        attachment = Attachments(filename=file.filename, relative_path=str(date_dir / stored_name), uploaded_by=uploaded_by, uploaded_at=datetime.now(), **kwargs)
         return self.save(attachment)
     async def delete_file(self, attachment_id: int) -> Union[Attachments, None]:
         attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
@@ -1283,26 +677,37 @@ class AttachmentService(BaseService):
         results = []
         for file in files:
             attachment = await self.save_file(file, uploaded_by)
-            status = "fail"
+            status = 'fail'
             if attachment:
-                status = "success"
-            results.append({"attachment": attachment, "status": status})
+                status = 'success'
+            results.append({'attachment': attachment, 'status': status})
         return results
     async def replace_file(self, attachment_id: int, edited_by: int, new_file: UploadFile) -> Union[Attachments, None]:
         attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
         if not attachment:
             return None
-        # Delete the old file
-        old_file_path = Path(settings.UPLOAD_DIR) / attachment.relative_path
-        if old_file_path.exists():
-            old_file_path.unlink()
-        # Save the new file
-        new_attachment = await self.save_file(new_file, attachment.uploaded_by)
-        if not new_attachment:
+        old_path = Path(settings.UPLOAD_DIR) / attachment.relative_path
+        if old_path.exists():
+            old_path.unlink()
+        ext = Path(new_file.filename).suffix
+        if ext not in settings.ALLOWED_FILE_EXTENSIONS:
             return None
-        # Update the database record
-        attachment.filename = new_attachment.filename
-        attachment.relative_path = new_attachment.relative_path
+        date_dir = get_date_subdir()
+        full_dir = Path(settings.UPLOAD_DIR) / date_dir
+        full_dir.mkdir(parents=True, exist_ok=True)
+        stored_name = f'{uuid4()}{ext}'
+        dest = full_dir / stored_name
+        total_bytes = 0
+        async with aiofiles.open(dest, 'wb') as f:
+            while (chunk := (await new_file.read(settings.CHUNK_SIZE))):
+                total_bytes += len(chunk)
+                if total_bytes > settings.MAX_FILE_SIZE:
+                    await f.close()
+                    dest.unlink(missing_ok=True)
+                    return None
+                await f.write(chunk)
+        attachment.filename = new_file.filename
+        attachment.relative_path = str(date_dir / stored_name)
         attachment.edited_by = edited_by
         attachment.edited_at = datetime.now()
         return self.commit_and_refresh(attachment)
@@ -1310,7 +715,6 @@ class AttachmentService(BaseService):
         attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
         if not attachment:
             return None
-        # Update the metadata fields provided in kwargs
         for key, value in kwargs.items():
             setattr(attachment, key, value)
         attachment.edited_by = edited_by
@@ -1319,7 +723,6 @@ class AttachmentService(BaseService):
 
 # File: ./backend/app/services/status_set.py
 from db.models.status_sets import StatusSets
-from sqlalchemy.orm import Session
 from .utils.service import BaseService
 class StatusSetService(BaseService):
     def get_status_set(self, status_set_id: int):
@@ -1344,6 +747,7 @@ class StatusSetService(BaseService):
 # File: ./backend/app/services/user_group.py
 from db.models.user_groups import UserGroups
 from .utils.service import BaseService
+from db.models.users import Users
 class UserGroupService(BaseService):
     def get_user_group(self, group_id: int):
         return self.get_by_id(UserGroups, group_id)
@@ -1352,6 +756,9 @@ class UserGroupService(BaseService):
     def list_user_groups(self):
         return self.db.query(UserGroups).all()
     def create_user_group(self, group_data: dict):
+        owner = self.db.query(Users).filter(Users.id == group_data['owner_id']).first()
+        if not owner:
+            raise ValueError('Owner user not found')
         return self.create(UserGroups, group_data)
     def update_user_group(self, group_id: int, group_data: dict):
         group = self.get_user_group(group_id)
@@ -1364,26 +771,43 @@ class UserGroupService(BaseService):
             return None
         return self.delete(group)
 
+# File: ./backend/app/services/relation_type.py
+from db.models.relation_types import RelationTypes
+from .utils.service import BaseService
+class RelationTypeService(BaseService):
+    def list_relation_types(self):
+        return self.db.query(RelationTypes).all()
+    def get_relation_type(self, type_id: int):
+        return self.get_by_id(RelationTypes, type_id)
+    def get_relation_type_by_name(self, name: str):
+        return self.db.query(RelationTypes).filter(RelationTypes.name == name).first()
+    def create_relation_type(self, data: dict):
+        return self.create(RelationTypes, data)
+    def update_relation_type(self, type_id: int, data: dict):
+        rel_type = self.get_relation_type(type_id)
+        if not rel_type:
+            return None
+        return self.update(rel_type, data)
+    def delete_relation_type(self, type_id: int):
+        rel_type = self.get_relation_type(type_id)
+        if not rel_type:
+            return None
+        return self.delete(rel_type)
+
 # File: ./backend/app/services/session.py
 from datetime import datetime
-from sqlalchemy.orm import Session
 from db.models.sessions import Sessions
-from app.api.utils.sessions import generate_session_secret, hash_session_secret
+from app.api.utils.session_token import SessionTokenFactory
 from .utils.service import BaseService
 class SessionService(BaseService):
     def create_session(self, user_id: int, expires_at: datetime, created_at: datetime) -> str:
-        session_secret = generate_session_secret()
-        session_hash = hash_session_secret(session_secret)
-        session = Sessions(
-            user_id=user_id,
-            token=session_hash,
-            created_at=created_at,
-            expires_at=expires_at
-        )
+        session_secret = SessionTokenFactory.generate_secret()
+        session_hash = SessionTokenFactory.hash_secret(session_secret)
+        session = Sessions(user_id=user_id, token=session_hash, created_at=created_at, expires_at=expires_at)
         self.save(session, refresh=True)
         return session_secret
     def get_session(self, session_secret: str):
-        session_hash = hash_session_secret(session_secret)
+        session_hash = SessionTokenFactory.hash_secret(session_secret)
         session = self.db.query(Sessions).filter(Sessions.token == session_hash).first()
         if not session:
             return None
@@ -1401,31 +825,89 @@ class SessionService(BaseService):
         return sessions
 
 # File: ./backend/app/services/device.py
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import joinedload
 from db.models.devices import Devices
-from db.models.projects import Projects
 from .utils.service import BaseService
+def _normalize_ram(value):
+    if value is None:
+        return None
+    return str(value) if not isinstance(value, str) else value
 class DeviceService(BaseService):
     def get_device(self, device_id: int):
         return self.get_by_id(Devices, device_id)
     def get_device_with_project(self, device_id: int):
-        return self.db.query(Devices).filter(Devices.id == device_id).options(
-            joinedload(Devices.project)
-        ).first()
+        return self.db.query(Devices).filter(Devices.id == device_id).options(joinedload(Devices.project)).first()
     def list_devices_by_project(self, project_id: int):
         return self.db.query(Devices).filter(Devices.project_id == project_id).all()
     def create_device(self, device_data):
+        if device_data.get('ram') is not None:
+            device_data = dict(device_data)
+            device_data['ram'] = _normalize_ram(device_data['ram'])
         return self.create(Devices, device_data)
     def update_device(self, device_id: int, device_data):
         device = self.get_device(device_id)
         if not device:
             return None
+        if device_data.get('ram') is not None:
+            device_data = dict(device_data)
+            device_data['ram'] = _normalize_ram(device_data['ram'])
         return self.update(device, device_data)
     def delete_device(self, device_id: int):
         device = self.get_device(device_id)
         if not device:
             return None
         return self.delete(device)
+
+# File: ./backend/app/services/execution_relationship.py
+from db.models.execution_relationships import ExecutionRelationships
+from .utils.service import BaseService
+class ExecutionRelationshipService(BaseService):
+    def create_relationship(self, execution_id: int, related_execution_id: int, relation_type_id: int) -> ExecutionRelationships:
+        rel = ExecutionRelationships(execution_id=execution_id, related_execution_id=related_execution_id, relation_type_id=relation_type_id)
+        return self.save(rel)
+    def delete_relationship(self, relationship_id: int) -> bool:
+        rel = self.get_by_id(ExecutionRelationships, relationship_id)
+        if not rel:
+            return False
+        self.delete(rel)
+        return True
+    def get_relationships_for_execution(self, execution_id: int):
+        return self.db.query(ExecutionRelationships).filter((ExecutionRelationships.execution_id == execution_id) | (ExecutionRelationships.related_execution_id == execution_id)).all()
+
+# File: ./backend/app/services/group_membership.py
+from db.models.groups_members import GroupsMembers
+from db.models.users import Users
+from db.models.user_groups import UserGroups
+from .utils.service import BaseService
+class GroupMembershipService(BaseService):
+    def add_member(self, group_id: int, user_id: int) -> GroupsMembers:
+        group = self.db.query(UserGroups).filter(UserGroups.id == group_id).first()
+        if not group:
+            raise ValueError('Group does not exist')
+        user = self.db.query(Users).filter(Users.id == user_id).first()
+        if not user:
+            raise ValueError('User does not exist')
+        membership = GroupsMembers(group_id=group_id, user_id=user_id)
+        self.add(membership)
+        self.commit()
+        self.refresh(membership)
+        return membership
+    def remove_member(self, group_id: int, user_id: int) -> bool:
+        membership = self.db.query(GroupsMembers).filter(GroupsMembers.group_id == group_id, GroupsMembers.user_id == user_id).first()
+        if not membership:
+            return False
+        self.delete(membership)
+        return True
+    def list_group_members(self, group_id: int) -> list[Users]:
+        group = self.db.query(UserGroups).filter(UserGroups.id == group_id).first()
+        if not group:
+            return []
+        return [m.user for m in group.members]
+    def list_user_groups(self, user_id: int) -> list[UserGroups]:
+        user = self.db.query(Users).filter(Users.id == user_id).first()
+        if not user:
+            return []
+        return [m.group for m in user.groups_member]
 
 # File: ./backend/app/services/utils/service.py
 from typing import Any, Type
@@ -1448,20 +930,13 @@ class BaseService:
         self.add(instance)
         self.db.flush()
         return instance
-    def save(self, instance: Any, *, refresh: bool = True) -> Any:
+    def save(self, instance: Any, *, refresh: bool=True) -> Any:
         self.add(instance)
         if refresh:
             return self.commit_and_refresh(instance)
         self.commit()
         return instance
-    def create(
-        self,
-        model_class: Type[Any],
-        data: dict[str, Any],
-        *,
-        commit: bool = True,
-        refresh: bool = True,
-    ) -> Any:
+    def create(self, model_class: Type[Any], data: dict[str, Any], *, commit: bool=True, refresh: bool=True) -> Any:
         instance = model_class(**data)
         self.add(instance)
         if commit:
@@ -1469,14 +944,7 @@ class BaseService:
                 return self.commit_and_refresh(instance)
             self.commit()
         return instance
-    def update(
-        self,
-        instance: Any,
-        data: dict[str, Any],
-        *,
-        commit: bool = True,
-        refresh: bool = True,
-    ) -> Any:
+    def update(self, instance: Any, data: dict[str, Any], *, commit: bool=True, refresh: bool=True) -> Any:
         for key, value in data.items():
             setattr(instance, key, value)
         if commit:
@@ -1484,12 +952,12 @@ class BaseService:
                 return self.commit_and_refresh(instance)
             self.commit()
         return instance
-    def delete(self, instance: Any, *, commit: bool = True) -> Any:
+    def delete(self, instance: Any, *, commit: bool=True) -> Any:
         self.db.delete(instance)
         if commit:
             self.commit()
         return instance
-    def get_by_id(self, model_class: Type[Any], instance_id: Any, *, field_name: str = "id") -> Any:
+    def get_by_id(self, model_class: Type[Any], instance_id: Any, *, field_name: str='id') -> Any:
         return self.db.query(model_class).filter(getattr(model_class, field_name) == instance_id).first()
     def get_one(self, model_class: Type[Any], **filters: Any) -> Any:
         query = self.db.query(model_class)
@@ -1501,26 +969,7 @@ class BaseService:
 
 # File: ./backend/app/api/__init__.py
 from fastapi import APIRouter
-from .v1 import (
-    attachment,
-    auth,
-    client,
-    device,
-    execution,
-    project,
-    resolution,
-    run,
-    scenario,
-    status_set,
-    status,
-    suitcase,
-    test_case_version,
-    test_case,
-    test_suite,
-    user_group,
-    user_type,
-    users,
-)
+from .v1 import attachment, auth, client, device, execution, project, resolution, run, scenario, status_set, status, suitcase, test_case_version, test_case, test_suite, user_group, user_type, users, group_memberships, execution_relationship, relation_type, permissions, group_permissions
 api_router = APIRouter()
 api_router.include_router(attachment.router)
 api_router.include_router(auth.router)
@@ -1540,10 +989,15 @@ api_router.include_router(test_suite.router)
 api_router.include_router(user_group.router)
 api_router.include_router(user_type.router)
 api_router.include_router(users.router)
+api_router.include_router(group_memberships.router)
+api_router.include_router(execution_relationship.router)
+api_router.include_router(relation_type.router)
+api_router.include_router(permissions.router)
+api_router.include_router(group_permissions.router)
 
 # File: ./backend/app/api/utils/auth.py
 from passlib.context import CryptContext
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -1551,55 +1005,85 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 # File: ./backend/app/api/utils/users.py
 from datetime import datetime, timezone
-from fastapi import Depends, Cookie, HTTPException, status
+from fastapi import Depends, Cookie
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from typing import Optional
+from app.api.utils.errors import raise_forbidden, raise_unauthorized
 from app.services.session import SessionService
 from app.services.users import UserService
 from db.session import get_db
 from db.models.users import Users
 from db.models.user_types import UserTypes
-def get_current_user(
-    session: str | None = Cookie(None),
-    db: Session = Depends(get_db),
-):
+from db.models.group_permissions import GroupPermissions
+from db.models.groups_members import GroupsMembers
+from db.models.permissions import Permissions
+class UserHelper:
+    def __init__(self, db: Session):
+        self.db = db
+        self._admin_type_id: Optional[int] = None
+    def _get_admin_user_type_id(self) -> Optional[int]:
+        if self._admin_type_id is None:
+            admin_type = self.db.query(UserTypes).filter(UserTypes.name == 'admin').first()
+            self._admin_type_id = admin_type.id if admin_type else None
+        return self._admin_type_id
+    def user_has_permission(self, user: Users, permission_code: str) -> bool:
+        if not user:
+            return False
+        admin_type_id = self._get_admin_user_type_id()
+        if admin_type_id is not None and user.user_type_id == admin_type_id:
+            return True
+        group_ids = select(GroupsMembers.group_id).where(GroupsMembers.user_id == user.id)
+        has_permission = self.db.query(GroupPermissions).join(Permissions, GroupPermissions.permission_id == Permissions.id).filter(GroupPermissions.group_id.in_(group_ids), Permissions.code == permission_code).first() is not None
+        return has_permission
+    def get_current_user_from_session(self, session: str) -> Users:
+        session_obj = SessionService(self.db).get_session(session)
+        if not session_obj:
+            raise_unauthorized()
+        expires_at = session_obj.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            SessionService(self.db).delete_session(session)
+            raise_unauthorized('Session expired')
+        user = UserService(self.db).get_user_by_id(session_obj.user_id)
+        if not user or not user.active:
+            raise_unauthorized()
+        return user
+def user_has_permission(db: Session, user: Users, permission_code: str) -> bool:
+    return UserHelper(db).user_has_permission(user, permission_code)
+def get_current_user(session: str | None=Cookie(None), db: Session=Depends(get_db)):
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Not authenticated"
-        )
-    session_obj = SessionService(db).get_session(session)
-    if not session_obj:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Not authenticated"
-        )
-    expires_at = session_obj.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at < datetime.now(timezone.utc):
-        SessionService(db).delete_session(session)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Session expired"
-        )
-    user = UserService(db).get_user_by_id(session_obj.user_id)
-    if not user or not user.active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Not authenticated"
-        )
-    return user
-async def get_current_admin_user(
-    current_user: Users = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> Users:
-    admin_type = db.query(UserTypes).filter(UserTypes.name == "admin").first()
-    if not admin_type or current_user.user_type_id != admin_type.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privileges required",
-        )
+        raise_unauthorized()
+    return UserHelper(db).get_current_user_from_session(session)
+async def get_current_admin_user(current_user: Users=Depends(get_current_user), db: Session=Depends(get_db)) -> Users:
+    helper = UserHelper(db)
+    admin_type_id = helper._get_admin_user_type_id()
+    if not admin_type_id or current_user.user_type_id != admin_type_id:
+        raise_forbidden('Admin privileges required')
     return current_user
+def require_permission(db: Session, user: Users, permission_code: str):
+    if not user:
+        raise_forbidden()
+    if not UserHelper(db).user_has_permission(user, permission_code):
+        raise_forbidden()
+    return True
+def permission_required(permission_code: str):
+    def dependency(current_user: Users=Depends(get_current_user), db: Session=Depends(get_db)) -> Users:
+        require_permission(db, current_user, permission_code)
+        return current_user
+    return dependency
+
+# File: ./backend/app/api/utils/session_token.py
+import hashlib
+import secrets
+class SessionTokenFactory:
+    @staticmethod
+    def generate_secret() -> str:
+        return secrets.token_urlsafe(32)
+    @staticmethod
+    def hash_secret(secret: str) -> str:
+        return hashlib.sha256(secret.encode()).hexdigest()
 
 # File: ./backend/app/api/utils/sessions.py
 import hashlib
@@ -1607,169 +1091,235 @@ import secrets
 def generate_session_secret() -> str:
     return secrets.token_urlsafe(32)
 def hash_session_secret(secret: str) -> str:
-    # Store session token hashes as hex strings so they can be stored in String columns.
     return hashlib.sha256(secret.encode()).hexdigest()
+
+# File: ./backend/app/api/utils/security.py
+from passlib.context import CryptContext
+class PasswordHasher:
+    _pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
+    @classmethod
+    def hash(cls, password: str) -> str:
+        return cls._pwd_context.hash(password)
+    @classmethod
+    def verify(cls, plain_password: str, hashed_password: str) -> bool:
+        return cls._pwd_context.verify(plain_password, hashed_password)
+
+# File: ./backend/app/api/utils/http_errors.py
+from fastapi import HTTPException, status
+class HttpError:
+    @staticmethod
+    def raise_error(status_code: int, detail: str) -> None:
+        raise HTTPException(status_code=status_code, detail=detail)
+    @classmethod
+    def unauthorized(cls, detail: str='Not authenticated') -> None:
+        cls.raise_error(status.HTTP_401_UNAUTHORIZED, detail)
+    @classmethod
+    def forbidden(cls, detail: str='Insufficient permissions') -> None:
+        cls.raise_error(status.HTTP_403_FORBIDDEN, detail)
+    @classmethod
+    def conflict(cls, detail: str) -> None:
+        cls.raise_error(status.HTTP_409_CONFLICT, detail)
+    @classmethod
+    def not_found(cls, detail: str='Not found') -> None:
+        cls.raise_error(status.HTTP_404_NOT_FOUND, detail)
+    @classmethod
+    def bad_request(cls, detail: str) -> None:
+        cls.raise_error(status.HTTP_400_BAD_REQUEST, detail)
+
+# File: ./backend/app/api/utils/errors.py
+from fastapi import HTTPException, status
+def raise_http_error(status_code: int, detail: str) -> None:
+    raise HTTPException(status_code=status_code, detail=detail)
+def raise_unauthorized(detail: str='Not authenticated') -> None:
+    raise_http_error(status.HTTP_401_UNAUTHORIZED, detail)
+def raise_forbidden(detail: str='Insufficient permissions') -> None:
+    raise_http_error(status.HTTP_403_FORBIDDEN, detail)
+def raise_conflict(detail: str) -> None:
+    raise_http_error(status.HTTP_409_CONFLICT, detail)
+
+# File: ./backend/app/api/utils/auth_dependencies.py
+from datetime import datetime, timezone
+from typing import Optional
+from fastapi import Cookie, Depends
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from app.api.utils.http_errors import HttpError
+from app.services.session import SessionService
+from app.services.users import UserService
+from db.models.group_permissions import GroupPermissions
+from db.models.groups_members import GroupsMembers
+from db.models.permissions import Permissions
+from db.models.user_types import UserTypes
+from db.models.users import Users
+from db.session import get_db
+class AdminTypeCache:
+    _admin_type_id: Optional[int] = None
+    @classmethod
+    def get(cls, db: Session) -> Optional[int]:
+        if cls._admin_type_id is None:
+            admin_type = db.query(UserTypes).filter(UserTypes.name == 'admin').first()
+            cls._admin_type_id = admin_type.id if admin_type else None
+        return cls._admin_type_id
+    @classmethod
+    def reset(cls) -> None:
+        cls._admin_type_id = None
+class PermissionChecker:
+    def __init__(self, db: Session):
+        self.db = db
+    def is_admin(self, user: Users) -> bool:
+        admin_type_id = AdminTypeCache.get(self.db)
+        return admin_type_id is not None and user.user_type_id == admin_type_id
+    def has_permission(self, user: Users, permission_code: str) -> bool:
+        if not user:
+            return False
+        if self.is_admin(user):
+            return True
+        group_ids = select(GroupsMembers.group_id).where(GroupsMembers.user_id == user.id)
+        return self.db.query(GroupPermissions).join(Permissions, GroupPermissions.permission_id == Permissions.id).filter(GroupPermissions.group_id.in_(group_ids), Permissions.code == permission_code).first() is not None
+    def require_permission(self, user: Users, permission_code: str) -> None:
+        if not user or not self.has_permission(user, permission_code):
+            HttpError.forbidden()
+class SessionAuthenticator:
+    def __init__(self, db: Session):
+        self.db = db
+    def resolve_user(self, session_secret: str) -> Users:
+        session = SessionService(self.db).get_session(session_secret)
+        if not session:
+            HttpError.unauthorized()
+        expires_at = session.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            SessionService(self.db).delete_session(session_secret)
+            HttpError.unauthorized('Session expired')
+        user = UserService(self.db).get_user_by_id(session.user_id)
+        if not user or not user.active:
+            HttpError.unauthorized()
+        return user
+def get_current_user(session: str | None=Cookie(None), db: Session=Depends(get_db)) -> Users:
+    if not session:
+        HttpError.unauthorized()
+    return SessionAuthenticator(db).resolve_user(session)
+async def get_current_admin_user(current_user: Users=Depends(get_current_user), db: Session=Depends(get_db)) -> Users:
+    if not PermissionChecker(db).is_admin(current_user):
+        HttpError.forbidden('Admin privileges required')
+    return current_user
+def permission_required(permission_code: str):
+    def dependency(current_user: Users=Depends(get_current_user), db: Session=Depends(get_db)) -> Users:
+        PermissionChecker(db).require_permission(current_user, permission_code)
+        return current_user
+    return dependency
 
 # File: ./backend/app/api/v1/auth.py
 from sqlalchemy.orm import Session
 from app.schemas.auth import *
-from fastapi import APIRouter, Depends, HTTPException, Response, Cookie
+from fastapi import APIRouter, Depends, Response, Cookie, status
 from typing import Optional
-from datetime import datetime, timedelta, timezone
 from app.schemas.users import UserOut
-from app.api.utils.users import get_current_user
+from app.api.utils.http_errors import HttpError
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from db.models.users import Users
 from app.services.auth import AuthService
 from core.config import settings
-router = APIRouter(
-    prefix="/auth",
-    tags=["auth"],
-)
-@router.post("/login", response_model=TokenPayload)
-async def login(
-    login_data: UserLogin,
-    response: Response,
-    db: Session = Depends(get_db)
-):
-    result = AuthService(db).login_user(
-        email=login_data.email, 
-        password=login_data.password
-    )
+router = APIRouter(prefix='/auth', tags=['auth'])
+@router.post('/login', response_model=TokenPayload)
+async def login(login_data: UserLogin, response: Response, db: Session=Depends(get_db)):
+    result = AuthService(db).login_user(email=login_data.email, password=login_data.password)
     if not result:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    response.set_cookie(
-        key="session",
-        value=result["access_token"],
-        httponly=True,
-        #secure=True,
-        samesite="lax",
-        max_age=settings.ACCESS_TOKEN_EXPIRE_SECONDS
-    )
-    return TokenPayload(
-        sub=result["user"].id,
-        exp=int((datetime.now(timezone.utc) + timedelta(seconds=settings.ACCESS_TOKEN_EXPIRE_SECONDS)).timestamp())
-    )
-@router.post("/logout")
-async def logout(
-    response: Response,
-    session: Optional[str] = Cookie(None),
-    db: Session = Depends(get_db),
-):
+        HttpError.unauthorized('Invalid credentials')
+    secure = settings.SECURE_COOKIES
+    response.set_cookie(key='session', value=result['access_token'], httponly=True, secure=secure, samesite='lax', max_age=settings.ACCESS_TOKEN_EXPIRE_SECONDS)
+    return TokenPayload(sub=result['user'].id, exp=int(result['expires_at']))
+@router.post('/logout')
+async def logout(response: Response, session: Optional[str]=Cookie(None), db: Session=Depends(get_db)):
     if not session:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        HttpError.unauthorized()
     is_valid = AuthService(db).validate_session(session)
     if not is_valid:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        HttpError.unauthorized()
     AuthService(db).logout_user(session)
-    response.delete_cookie(key="session")
+    response.delete_cookie(key='session')
     return UserLogout()
-@router.post("/register", response_model=UserOut)
-async def register(
-    login_data: UserRegister,
-    response: Response,
-    db: Session = Depends(get_db)
-):
-    result = AuthService(db).register_user(
-        first_name=login_data.first_name,
-        last_name=login_data.last_name,
-        email=login_data.email, 
-        password=login_data.password
-    )
+@router.post('/register', response_model=UserOut)
+async def register(login_data: UserRegister, response: Response, db: Session=Depends(get_db)):
+    result = AuthService(db).register_user(first_name=login_data.first_name, last_name=login_data.last_name, email=login_data.email, password=login_data.password)
     if not result:
-        raise HTTPException(status_code=400, detail="User already exists")
-    return UserOut(
-        id=result.id,
-        email=result.email,
-        first_name=result.first_name,
-        last_name=result.last_name,
-        active=result.active,
-        user_type_id=result.user_type_id,
-        user_group_id=result.user_group_id,
-        created_at=result.created_at,
-        last_login_at=result.last_login_at
-    )
-@router.get("/me", response_model=UserOut)
-async def get_current_user_info(
-    current_user: Users = Depends(get_current_user),
-):
-    """Return the authenticated user's profile."""
+        HttpError.bad_request('User already exists')
+    return UserOut(id=result.id, email=result.email, first_name=result.first_name, last_name=result.last_name, active=result.active, user_type_id=result.user_type_id, created_at=result.created_at, last_login_at=result.last_login_at)
+@router.get('/me', response_model=UserOut)
+async def get_current_user_info(current_user: Users=Depends(get_current_user)):
     return current_user
 
 # File: ./backend/app/api/v1/execution.py
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.api.utils.users import get_current_admin_user, get_current_user
-from app.schemas.execution import ExecutionCreate, ExecutionOut, ExecutionUpdate
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.schemas.execution import ExecutionCreate, ExecutionOut, ExecutionUpdate, ExecutionAssign, ExecutionBulkAssign, ExecutionStart
 from app.services.execution import ExecutionService
 from db.models.users import Users
 from db.session import get_db
-router = APIRouter(
-    prefix="/executions",
-    tags=["executions"],
-)
-@router.post("/matrix", response_model=List[ExecutionOut], status_code=status.HTTP_201_CREATED)
-def create_execution_matrix(
-    execution_in: ExecutionCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/executions', tags=['executions'])
+@router.post('/matrix', response_model=List[ExecutionOut], status_code=status.HTTP_201_CREATED)
+def create_execution_matrix(execution_in: ExecutionCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('executions.write'))):
     service = ExecutionService(db)
     try:
-        executions = service.create_executions_for_test_suite(
-            test_suite_id=execution_in.test_suite_id,
-            run_id=execution_in.run_id,
-            device_ids=execution_in.device_ids,
-        )
+        executions = service.create_executions_for_test_suite(test_suite_id=execution_in.test_suite_id, run_id=execution_in.run_id, device_ids=execution_in.device_ids)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return executions
-@router.get("/{execution_id}", response_model=ExecutionOut)
-def get_execution(
-    execution_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{execution_id}', response_model=ExecutionOut)
+def get_execution(execution_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('executions.read'))):
     execution = ExecutionService(db).get_execution(execution_id)
     if not execution:
-        raise HTTPException(status_code=404, detail="Execution not found")
+        raise HTTPException(status_code=404, detail='Execution not found')
     return execution
-@router.get("/run/{run_id}", response_model=List[ExecutionOut])
-def list_executions_by_run(
-    run_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/run/{run_id}', response_model=List[ExecutionOut])
+def list_executions_by_run(run_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('executions.read'))):
     return ExecutionService(db).list_executions_by_run(run_id)
-@router.patch("/{execution_id}", response_model=ExecutionOut)
-def update_execution(
-    execution_id: int,
-    execution_in: ExecutionUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.patch('/{execution_id}', response_model=ExecutionOut)
+def update_execution(execution_id: int, execution_in: ExecutionUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('executions.write'))):
     service = ExecutionService(db)
     try:
-        execution = service.update_execution(
-            execution_id,
-            execution_in.model_dump(exclude_unset=True),
-            current_user,
-        )
+        execution = service.update_execution(execution_id, execution_in.model_dump(exclude_unset=True), current_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not execution:
-        raise HTTPException(status_code=404, detail="Execution not found")
+        raise HTTPException(status_code=404, detail='Execution not found')
     return execution
-@router.delete("/{execution_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_execution(
-    execution_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{execution_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_execution(execution_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     execution = ExecutionService(db).delete_execution(execution_id)
     if not execution:
-        raise HTTPException(status_code=404, detail="Execution not found")
+        raise HTTPException(status_code=404, detail='Execution not found')
+@router.post('/{execution_id}/assign', response_model=ExecutionOut, status_code=status.HTTP_200_OK)
+def assign_execution(execution_id: int, assign_in: ExecutionAssign, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('executions.write'))):
+    service = ExecutionService(db)
+    try:
+        execution = service.assign_execution(execution_id, assign_in.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not execution:
+        raise HTTPException(status_code=404, detail='Execution not found')
+    return execution
+@router.post('/bulk/assign', response_model=List[ExecutionOut], status_code=status.HTTP_200_OK)
+def bulk_assign_executions(assign_in: ExecutionBulkAssign, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('executions.write'))):
+    service = ExecutionService(db)
+    executions = service.assign_executions_bulk(assign_in.execution_ids, assign_in.user_id)
+    if executions is None:
+        raise HTTPException(status_code=404, detail='One or more executions or user not found')
+    return executions
+@router.post('/{execution_id}/start', response_model=ExecutionOut, status_code=status.HTTP_200_OK)
+def start_execution(execution_id: int, start_in: ExecutionStart, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('executions.write'))):
+    service = ExecutionService(db)
+    try:
+        execution = service.start_execution(execution_id, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not execution:
+        raise HTTPException(status_code=404, detail='Execution not found')
+    return execution
 
 # File: ./backend/app/api/v1/test_case_version.py
 from typing import List
@@ -1777,138 +1327,83 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.test_case_version import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.test_case_version import TestCaseVersionService
-router = APIRouter(
-    prefix="/test-case-versions",
-    tags=["test-case-versions"],
-)
-@router.post("/", response_model=TestCaseVersionOut, status_code=status.HTTP_201_CREATED)
-def create_test_case_version(
-    test_case_version_in: TestCaseVersionCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/test-case-versions', tags=['test-case-versions'])
+@router.post('/', response_model=TestCaseVersionOut, status_code=status.HTTP_201_CREATED)
+def create_test_case_version(test_case_version_in: TestCaseVersionBase, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_case_versions.write'))):
     service = TestCaseVersionService(db)
-    test_case_version = service.create_test_case_version(test_case_version_in.model_dump())
+    data = test_case_version_in.model_dump(exclude_unset=True)
+    data['created_by'] = current_user.id
+    test_case_version = service.create_test_case_version(data)
     return test_case_version
-@router.get("/{test_case_version_id}", response_model=TestCaseVersionOut)
-def get_test_case_version(
-    test_case_version_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{test_case_version_id}', response_model=TestCaseVersionOut)
+def get_test_case_version(test_case_version_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_case_versions.read'))):
     test_case_version = TestCaseVersionService(db).get_test_case_version(test_case_version_id)
     if not test_case_version:
-        raise HTTPException(status_code=404, detail="Test case version not found")
+        raise HTTPException(status_code=404, detail='Test case version not found')
     return test_case_version
-@router.get("/test-case/{test_case_id}", response_model=List[TestCaseVersionOut])
-def list_test_case_versions_by_test_case(
-    test_case_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/test-case/{test_case_id}', response_model=List[TestCaseVersionOut])
+def list_test_case_versions_by_test_case(test_case_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_case_versions.read'))):
     service = TestCaseVersionService(db)
     test_case_versions = service.list_test_case_versions_by_test_case(test_case_id)
     return test_case_versions
-@router.patch("/{test_case_version_id}", response_model=TestCaseVersionOut)
-def update_test_case_version(
-    test_case_version_id: int,
-    test_case_version_in: TestCaseVersionUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.patch('/{test_case_version_id}', response_model=TestCaseVersionOut)
+def update_test_case_version(test_case_version_id: int, test_case_version_in: TestCaseVersionUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_case_versions.write'))):
     test_case_version = TestCaseVersionService(db).update_test_case_version(test_case_version_id, test_case_version_in.model_dump(exclude_unset=True))
     if not test_case_version:
-        raise HTTPException(status_code=404, detail="Test case version not found")
+        raise HTTPException(status_code=404, detail='Test case version not found')
     return test_case_version
-@router.delete("/{test_case_version_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_test_case_version(
-    test_case_version_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{test_case_version_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_test_case_version(test_case_version_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     test_case_version = TestCaseVersionService(db).delete_test_case_version(test_case_version_id)
     if not test_case_version:
-        raise HTTPException(status_code=404, detail="Test case version not found")
+        raise HTTPException(status_code=404, detail='Test case version not found')
 
 # File: ./backend/app/api/v1/users.py
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from app.schemas.users import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.http_errors import HttpError
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.users import UserService
-router = APIRouter(
-    prefix="/users",
-    tags=["users"],
-)
-# ---- Admin-only endpoints ----
-@router.get("/", response_model=List[UserOut])
-def list_users(
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
-    """List all users (admin only)."""
+router = APIRouter(prefix='/users', tags=['users'])
+@router.get('/', response_model=List[UserOut])
+def list_users(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('users.read'))):
     return UserService(db).list_users()
-# ---- Self-service endpoints ----
-@router.patch("/me", response_model=UserOut)
-def update_self(
-    user_in: UserUpdateSelf,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    """Authenticated user updates their own profile."""
-    # Prevent email conflicts
+@router.patch('/me', response_model=UserOut)
+def update_self(user_in: UserUpdateSelf, db: Session=Depends(get_db), current_user: Users=Depends(get_current_user)):
     if user_in.email and user_in.email != current_user.email:
         existing = UserService(db).get_user_by_email(user_in.email)
         if existing:
-            raise HTTPException(status_code=400, detail="Email already in use")
+            HttpError.bad_request('Email already in use')
     user = UserService(db).update_user(current_user.id, user_in.model_dump(exclude_unset=True))
     return user
-@router.get("/me", response_model=UserOut)
-def get_self(
-    current_user: Users = Depends(get_current_user),
-):
-    """Get current user profile (convenience duplicate of /auth/me)."""
+@router.get('/me', response_model=UserOut)
+def get_self(current_user: Users=Depends(get_current_user)):
     return current_user
-# ---- Admin-only endpoints for specific users ----
-@router.get("/{user_id}", response_model=UserOut)
-def get_user(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
-    """Get a user by ID (admin only)."""
+@router.get('/{user_id}', response_model=UserOut)
+def get_user(user_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('users.read'))):
     user = UserService(db).get_user_by_id(user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        HttpError.not_found('User not found')
     return user
-@router.patch("/{user_id}", response_model=UserOut)
-def admin_update_user(
-    user_id: int,
-    user_in: UserUpdateAdmin,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
-    """Admin updates user fields (group, type, active)."""
+@router.patch('/{user_id}', response_model=UserOut)
+def admin_update_user(user_id: int, user_in: UserUpdateAdmin, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     user = UserService(db).update_user(user_id, user_in.model_dump(exclude_unset=True))
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        HttpError.not_found('User not found')
     return user
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
-    """Delete a user (admin only)."""
+@router.delete('/{user_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     user = UserService(db).delete_user(user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        HttpError.not_found('User not found')
+    return None
 
 # File: ./backend/app/api/v1/resolution.py
 from typing import List
@@ -1916,59 +1411,34 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.resolution import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.resolution import ResolutionService
-router = APIRouter(
-    prefix="/resolutions",
-    tags=["resolutions"],
-)
-@router.post("/", response_model=ResolutionOut, status_code=status.HTTP_201_CREATED)
-def create_resolution(
-    resolution_in: ResolutionCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/resolutions', tags=['resolutions'])
+@router.post('/', response_model=ResolutionOut, status_code=status.HTTP_201_CREATED)
+def create_resolution(resolution_in: ResolutionCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('resolutions.write'))):
     service = ResolutionService(db)
     return service.create_resolution(resolution_in.model_dump())
-@router.get("/{resolution_id}", response_model=ResolutionOut)
-def get_resolution(
-    resolution_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{resolution_id}', response_model=ResolutionOut)
+def get_resolution(resolution_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('resolutions.read'))):
     resolution = ResolutionService(db).get_resolution(resolution_id)
     if not resolution:
-        raise HTTPException(status_code=404, detail="Resolution not found")
+        raise HTTPException(status_code=404, detail='Resolution not found')
     return resolution
-@router.get("/", response_model=List[ResolutionOut])
-def list_resolutions(
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/', response_model=List[ResolutionOut])
+def list_resolutions(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('resolutions.read'))):
     return ResolutionService(db).list_resolutions()
-@router.patch("/{resolution_id}", response_model=ResolutionOut)
-def update_resolution(
-    resolution_id: int,
-    resolution_in: ResolutionUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    resolution = ResolutionService(db).update_resolution(
-        resolution_id, resolution_in.model_dump(exclude_unset=True)
-    )
+@router.patch('/{resolution_id}', response_model=ResolutionOut)
+def update_resolution(resolution_id: int, resolution_in: ResolutionUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('resolutions.write'))):
+    resolution = ResolutionService(db).update_resolution(resolution_id, resolution_in.model_dump(exclude_unset=True))
     if not resolution:
-        raise HTTPException(status_code=404, detail="Resolution not found")
+        raise HTTPException(status_code=404, detail='Resolution not found')
     return resolution
-@router.delete("/{resolution_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_resolution(
-    resolution_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{resolution_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_resolution(resolution_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     resolution = ResolutionService(db).delete_resolution(resolution_id)
     if not resolution:
-        raise HTTPException(status_code=404, detail="Resolution not found")
+        raise HTTPException(status_code=404, detail='Resolution not found')
 
 # File: ./backend/app/api/v1/test_case.py
 from typing import List
@@ -1976,142 +1446,127 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.test_case import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.test_case import TestCaseService
-router = APIRouter(
-    prefix="/test-cases",
-    tags=["test-cases"],
-)
-@router.post("/", response_model=TestCaseOut, status_code=status.HTTP_201_CREATED)
-def create_test_case(
-    test_case_in: TestCaseCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/test-cases', tags=['test-cases'])
+@router.post('/', response_model=TestCaseOut, status_code=status.HTTP_201_CREATED)
+def create_test_case(test_case_in: TestCaseCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_cases.write'))):
     service = TestCaseService(db)
     test_case = service.create_test_case(test_case_in.model_dump())
     return test_case
-@router.post("/bulk", response_model=TestCaseBulkCreateOut, status_code=status.HTTP_201_CREATED)
-def create_test_cases_bulk(
-    bulk_in: TestCaseBulkCreateIn,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.post('/bulk', response_model=TestCaseBulkCreateOut, status_code=status.HTTP_201_CREATED)
+def create_test_cases_bulk(bulk_in: TestCaseBulkCreateIn, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_cases.write'))):
     items = [tc.model_dump() for tc in bulk_in.test_cases]
-    results = TestCaseService(db).create_test_cases_and_versions_bulk(
-        items=items,
-        created_by=current_user.id,
-        test_suite_id=bulk_in.test_suite_id,
-    )
+    results = TestCaseService(db).create_test_cases_and_versions_bulk(items=items, created_by=current_user.id, test_suite_id=bulk_in.test_suite_id)
     return TestCaseBulkCreateOut(created=results)
-@router.get("/{test_case_id}", response_model=TestCaseOut)
-def get_test_case(
-    test_case_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{test_case_id}', response_model=TestCaseOut)
+def get_test_case(test_case_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_cases.read'))):
     test_case = TestCaseService(db).get_test_case(test_case_id)
     if not test_case:
-        raise HTTPException(status_code=404, detail="Test case not found")
+        raise HTTPException(status_code=404, detail='Test case not found')
     return test_case
-@router.get("/", response_model=List[TestCaseOut])
-def list_test_cases(
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/', response_model=List[TestCaseOut])
+def list_test_cases(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_cases.read'))):
     service = TestCaseService(db)
     test_cases = service.list_test_cases()
     return test_cases
-@router.patch("/{test_case_id}", response_model=TestCaseOut)
-def update_test_case(
-    test_case_id: int,
-    test_case_in: TestCaseUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.patch('/{test_case_id}', response_model=TestCaseOut)
+def update_test_case(test_case_id: int, test_case_in: TestCaseUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_cases.write'))):
     test_case = TestCaseService(db).update_test_case(test_case_id, test_case_in.model_dump(exclude_unset=True))
     if not test_case:
-        raise HTTPException(status_code=404, detail="Test case not found")
+        raise HTTPException(status_code=404, detail='Test case not found')
     return test_case
-@router.delete("/{test_case_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_test_case(
-    test_case_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{test_case_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_test_case(test_case_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     test_case = TestCaseService(db).delete_test_case(test_case_id)
     if not test_case:
-        raise HTTPException(status_code=404, detail="Test case not found")
+        raise HTTPException(status_code=404, detail='Test case not found')
 
 # File: ./backend/app/api/v1/client.py
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from db.session import get_db
 from app.schemas.client import *
 from db.models.clients import Clients
 from db.models.projects import Projects
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.http_errors import HttpError
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from app.services.client import ClientService
-router = APIRouter(
-    prefix="/clients",
-    tags=["clients"],
-)
-@router.post("/", response_model=ClientOut, status_code=status.HTTP_201_CREATED)
-def create_client(
-    client_in: ClientCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/clients', tags=['clients'])
+@router.post('/', response_model=ClientOut, status_code=status.HTTP_201_CREATED)
+def create_client(client_in: ClientCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('clients.write'))):
     service = ClientService(db)
     client = service.create_client(client_in.model_dump())
     return client
-@router.get("/{client_id}", response_model=ClientOut)
-def get_client(
-    client_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{client_id}', response_model=ClientOut)
+def get_client(client_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('clients.read'))):
     client = ClientService(db).get_client(client_id)
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        HttpError.not_found('Client not found')
     return client
-@router.get("/{client_id}/with-projects", response_model=ClientWithProjects)
-def get_client_with_projects(
-    client_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{client_id}/with-projects', response_model=ClientWithProjects)
+def get_client_with_projects(client_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('clients.read'))):
     client_with_projects = ClientService(db).get_client_with_projects(client_id)
     if not client_with_projects:
-        raise HTTPException(status_code=404, detail="Client not found")
+        HttpError.not_found('Client not found')
     return client_with_projects
-@router.patch("/{client_id}", response_model=ClientOut)
-def update_client(
-    client_id: int,
-    client_in: ClientUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.patch('/{client_id}', response_model=ClientOut)
+def update_client(client_id: int, client_in: ClientUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('clients.write'))):
     client = ClientService(db).update_client(client_id, client_in.model_dump(exclude_unset=True))
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        HttpError.not_found('Client not found')
     return client
-@router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_client(
-    client_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{client_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_client(client_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     client = ClientService(db).delete_client(client_id)
     if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
+        HttpError.not_found('Client not found')
+
+# File: ./backend/app/api/v1/group_memberships.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.schemas.group_membership import GroupMembershipCreate, GroupMembershipOut
+from app.schemas.users import UserOut
+from app.schemas.user_group import UserGroupOut
+from db.session import get_db
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from db.models.users import Users
+from app.services.group_membership import GroupMembershipService
+router = APIRouter(prefix='/group-memberships', tags=['group-memberships'])
+@router.post('/', response_model=GroupMembershipOut, status_code=status.HTTP_201_CREATED)
+def add_member(membership_in: GroupMembershipCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('group_memberships.write'))):
+    service = GroupMembershipService(db)
+    try:
+        membership = service.add_member(membership_in.group_id, membership_in.user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return membership
+@router.delete('/{group_id}/{user_id}', status_code=status.HTTP_204_NO_CONTENT)
+def remove_member(group_id: int, user_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
+    service = GroupMembershipService(db)
+    try:
+        success = service.remove_member(group_id, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not success:
+        raise HTTPException(status_code=404, detail='Membership not found')
+@router.get('/group/{group_id}/members', response_model=list[UserOut])
+def list_group_members(group_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('group_memberships.read'))):
+    service = GroupMembershipService(db)
+    members = service.list_group_members(group_id)
+    return members
+@router.get('/user/{user_id}/groups', response_model=list[UserGroupOut])
+def list_user_groups(user_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('group_memberships.read'))):
+    service = GroupMembershipService(db)
+    groups = service.list_user_groups(user_id)
+    return groups
 
 # File: ./backend/app/api/v1/project.py
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from db.session import get_db
 from app.schemas.client import *
@@ -2119,61 +1574,41 @@ from app.schemas.project import *
 from db.models.clients import Clients
 from db.models.projects import Projects
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.errors import raise_http_error
+from app.api.utils.http_errors import HttpError
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from app.services.project import ProjectService
-router = APIRouter(
-    prefix="/projects",
-    tags=["projects"],
-)
-@router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
-def create_project(
-    project_in: ProjectCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/projects', tags=['projects'])
+@router.post('/', response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
+def create_project(project_in: ProjectCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('projects.write'))):
     service = ProjectService(db)
-    project = service.create_project(project_in.model_dump())
+    project_data = project_in.model_dump()
+    project_data['owner_id'] = current_user.id
+    project = service.create_project(project_data)
     return project
-@router.get("/{project_id}", response_model=ProjectOut)
-def get_project(
-    project_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{project_id}', response_model=ProjectOut)
+def get_project(project_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('projects.read'))):
     project = ProjectService(db).get_project(project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        HttpError.not_found('Project not found')
     return project
-@router.get("/{project_id}/with-client", response_model=ProjectWithClient)
-def get_project_with_client(
-    project_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{project_id}/with-client', response_model=ProjectWithClient)
+def get_project_with_client(project_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('projects.read'))):
     project_with_client = ProjectService(db).get_project_with_client(project_id)
     if not project_with_client:
-        raise HTTPException(status_code=404, detail="Project not found")
+        HttpError.not_found('Project not found')
     return project_with_client
-@router.patch("/{project_id}", response_model=ProjectOut)
-def update_project(
-    project_id: int,
-    project_in: ProjectUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.patch('/{project_id}', response_model=ProjectOut)
+def update_project(project_id: int, project_in: ProjectUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('projects.write'))):
     project = ProjectService(db).update_project(project_id, project_in.model_dump(exclude_unset=True))
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        HttpError.not_found('Project not found')
     return project
-@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_project(
-    project_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{project_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(project_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     project = ProjectService(db).delete_project(project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        HttpError.not_found('Project not found')
 
 # File: ./backend/app/api/v1/scenario.py
 from typing import List
@@ -2181,125 +1616,107 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.scenario import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.scenario import ScenarioService
-router = APIRouter(
-    prefix="/scenarios",
-    tags=["scenarios"],
-)
-@router.post("/", response_model=ScenarioOut, status_code=status.HTTP_201_CREATED)
-def create_scenario(
-    scenario_in: ScenarioCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/scenarios', tags=['scenarios'])
+@router.post('/', response_model=ScenarioOut, status_code=status.HTTP_201_CREATED)
+def create_scenario(scenario_in: ScenarioCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('scenarios.write'))):
     service = ScenarioService(db)
     return service.create_scenario(scenario_in.model_dump())
-@router.get("/{scenario_id}", response_model=ScenarioOut)
-def get_scenario(
-    scenario_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{scenario_id}', response_model=ScenarioOut)
+def get_scenario(scenario_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('scenarios.read'))):
     scenario = ScenarioService(db).get_scenario(scenario_id)
     if not scenario:
-        raise HTTPException(status_code=404, detail="Scenario not found")
+        raise HTTPException(status_code=404, detail='Scenario not found')
     return scenario
-@router.get("/", response_model=List[ScenarioOut])
-def list_scenarios(
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/', response_model=List[ScenarioOut])
+def list_scenarios(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('scenarios.read'))):
     return ScenarioService(db).list_scenarios()
-@router.patch("/{scenario_id}", response_model=ScenarioOut)
-def update_scenario(
-    scenario_id: int,
-    scenario_in: ScenarioUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    scenario = ScenarioService(db).update_scenario(
-        scenario_id, scenario_in.model_dump(exclude_unset=True)
-    )
+@router.patch('/{scenario_id}', response_model=ScenarioOut)
+def update_scenario(scenario_id: int, scenario_in: ScenarioUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('scenarios.write'))):
+    scenario = ScenarioService(db).update_scenario(scenario_id, scenario_in.model_dump(exclude_unset=True))
     if not scenario:
-        raise HTTPException(status_code=404, detail="Scenario not found")
+        raise HTTPException(status_code=404, detail='Scenario not found')
     return scenario
-@router.delete("/{scenario_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_scenario(
-    scenario_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{scenario_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_scenario(scenario_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     scenario = ScenarioService(db).delete_scenario(scenario_id)
     if not scenario:
-        raise HTTPException(status_code=404, detail="Scenario not found")
+        raise HTTPException(status_code=404, detail='Scenario not found')
 
 # File: ./backend/app/api/v1/user_type.py
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from app.schemas.user_type import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.http_errors import HttpError
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.user_type import UserTypeService
-router = APIRouter(
-    prefix="/user-types",
-    tags=["user-types"],
-)
-@router.post("/", response_model=UserTypeOut, status_code=status.HTTP_201_CREATED)
-def create_user_type(
-    user_type_in: UserTypeCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+router = APIRouter(prefix='/user-types', tags=['user-types'])
+@router.post('/', response_model=UserTypeOut, status_code=status.HTTP_201_CREATED)
+def create_user_type(user_type_in: UserTypeCreate, db: Session=Depends(get_db), current_user: Users=Depends(get_current_user)):
     service = UserTypeService(db)
     return service.create_user_type(user_type_in.model_dump())
-@router.get("/{user_type_id}", response_model=UserTypeOut)
-def get_user_type(
-    user_type_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{user_type_id}', response_model=UserTypeOut)
+def get_user_type(user_type_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_user)):
     user_type = UserTypeService(db).get_user_type_by_id(user_type_id)
     if not user_type:
-        raise HTTPException(status_code=404, detail="User type not found")
+        HttpError.not_found('User type not found')
     return user_type
-@router.get("/", response_model=List[UserTypeOut])
-def list_user_types(
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    # simple list; the service currently doesn't have a list method, but we can query directly
+@router.get('/', response_model=List[UserTypeOut])
+def list_user_types(db: Session=Depends(get_db), current_user: Users=Depends(get_current_user)):
     from db.models.user_types import UserTypes
     return db.query(UserTypes).all()
-@router.patch("/{user_type_id}", response_model=UserTypeOut)
-def update_user_type(
-    user_type_id: int,
-    user_type_in: UserTypeUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    user_type = UserTypeService(db).update_user_type(
-        user_type_id, user_type_in.model_dump(exclude_unset=True)
-    )
+@router.patch('/{user_type_id}', response_model=UserTypeOut)
+def update_user_type(user_type_id: int, user_type_in: UserTypeUpdate, db: Session=Depends(get_db), current_user: Users=Depends(get_current_user)):
+    user_type = UserTypeService(db).update_user_type(user_type_id, user_type_in.model_dump(exclude_unset=True))
     if not user_type:
-        raise HTTPException(status_code=404, detail="User type not found")
+        HttpError.not_found('User type not found')
     return user_type
-@router.delete("/{user_type_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user_type(
-    user_type_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
-    # we add a delete method to the service or delete directly
+@router.delete('/{user_type_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_user_type(user_type_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_user)):
     from db.models.user_types import UserTypes
     user_type = db.query(UserTypes).filter(UserTypes.id == user_type_id).first()
     if not user_type:
-        raise HTTPException(status_code=404, detail="User type not found")
+        HttpError.not_found('User type not found')
     db.delete(user_type)
     db.commit()
+
+# File: ./backend/app/api/v1/group_permissions.py
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.schemas.group_permission import GroupPermissionCreate, GroupPermissionOut
+from app.schemas.permission import PermissionOut
+from db.models.users import Users
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from db.session import get_db
+from app.services.group_permission import GroupPermissionService
+router = APIRouter(prefix='/group-permissions', tags=['group-permissions'])
+@router.post('/', response_model=GroupPermissionOut, status_code=status.HTTP_201_CREATED)
+def assign_permission(gp_in: GroupPermissionCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('group_permissions.write'))):
+    service = GroupPermissionService(db)
+    try:
+        gp = service.assign_permission(gp_in.group_id, gp_in.permission_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return gp
+@router.delete('/{group_id}/{permission_id}', status_code=status.HTTP_204_NO_CONTENT)
+def remove_permission(group_id: int, permission_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('group_permissions.write'))):
+    service = GroupPermissionService(db)
+    success = service.remove_permission(group_id, permission_id)
+    if not success:
+        raise HTTPException(status_code=404, detail='Assignment not found')
+@router.get('/group/{group_id}', response_model=List[PermissionOut])
+def list_permissions_for_group(group_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('group_permissions.read'))):
+    return GroupPermissionService(db).list_permissions_for_group(group_id)
+@router.get('/permission/{permission_id}/groups', response_model=List[int])
+def list_groups_for_permission(permission_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('group_permissions.read'))):
+    groups = GroupPermissionService(db).list_groups_for_permission(permission_id)
+    return [g.id for g in groups]
 
 # File: ./backend/app/api/v1/test_suite.py
 from typing import List
@@ -2307,74 +1724,43 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.test_suite import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.test_suite import TestSuiteService
-router = APIRouter(
-    prefix="/test-suites",
-    tags=["test-suites"],
-)
-@router.post("/", response_model=TestSuiteOut, status_code=status.HTTP_201_CREATED)
-def create_test_suite(
-    test_suite_in: TestSuiteCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/test-suites', tags=['test-suites'])
+@router.post('/', response_model=TestSuiteOut, status_code=status.HTTP_201_CREATED)
+def create_test_suite(test_suite_in: TestSuiteCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_suites.write'))):
     service = TestSuiteService(db)
     test_suite = service.create_test_suite(test_suite_in.model_dump())
     return test_suite
-@router.get("/{test_suite_id}", response_model=TestSuiteOut)
-def get_test_suite(
-    test_suite_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{test_suite_id}', response_model=TestSuiteOut)
+def get_test_suite(test_suite_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_suites.read'))):
     test_suite = TestSuiteService(db).get_test_suite(test_suite_id)
     if not test_suite:
-        raise HTTPException(status_code=404, detail="Test suite not found")
+        raise HTTPException(status_code=404, detail='Test suite not found')
     return test_suite
-@router.get("/", response_model=List[TestSuiteOut])
-def list_test_suites(
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/', response_model=List[TestSuiteOut])
+def list_test_suites(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_suites.read'))):
     service = TestSuiteService(db)
     test_suites = service.list_test_suites()
     return test_suites
-@router.get("/by-name/{name}", response_model=TestSuiteOut)
-def get_test_suite_by_name(
-    name: str,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    """Look up a test suite by its unique name.
-    Returns 404 if no suite with that name exists, so the frontend can
-    branch cleanly: found → use the id; not found → call POST /test-suites/.
-    """
+@router.get('/by-name/{name}', response_model=TestSuiteOut)
+def get_test_suite_by_name(name: str, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_suites.read'))):
     test_suite = TestSuiteService(db).get_test_suite_by_name(name)
     if not test_suite:
-        raise HTTPException(status_code=404, detail="Test suite not found")
+        raise HTTPException(status_code=404, detail='Test suite not found')
     return test_suite
-@router.patch("/{test_suite_id}", response_model=TestSuiteOut)
-def update_test_suite(
-    test_suite_id: int,
-    test_suite_in: TestSuiteUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.patch('/{test_suite_id}', response_model=TestSuiteOut)
+def update_test_suite(test_suite_id: int, test_suite_in: TestSuiteUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('test_suites.write'))):
     test_suite = TestSuiteService(db).update_test_suite(test_suite_id, test_suite_in.model_dump(exclude_unset=True))
     if not test_suite:
-        raise HTTPException(status_code=404, detail="Test suite not found")
+        raise HTTPException(status_code=404, detail='Test suite not found')
     return test_suite
-@router.delete("/{test_suite_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_test_suite(
-    test_suite_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{test_suite_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_test_suite(test_suite_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     test_suite = TestSuiteService(db).delete_test_suite(test_suite_id)
     if not test_suite:
-        raise HTTPException(status_code=404, detail="Test suite not found")
+        raise HTTPException(status_code=404, detail='Test suite not found')
 
 # File: ./backend/app/api/v1/run.py
 from typing import List
@@ -2382,60 +1768,39 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from db.session import get_db
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.users import get_current_user, get_current_admin_user, permission_required
 from app.services.run import RunService
 from app.schemas.run import *
-router = APIRouter(
-    prefix="/runs",
-    tags=["runs"],
-)
-@router.post("/", response_model=RunOut, status_code=status.HTTP_201_CREATED)
-def create_run(
-    run_in: RunCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/runs', tags=['runs'])
+@router.post('/', response_model=RunOut, status_code=status.HTTP_201_CREATED)
+def create_run(run_in: RunCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('runs.write'))):
     service = RunService(db)
     run = service.create_run(run_in.model_dump())
     return run
-@router.get("/{run_id}", response_model=RunOut, status_code=status.HTTP_200_OK)
-def get_run(
-    run_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{run_id}', response_model=RunOut, status_code=status.HTTP_200_OK)
+def get_run(run_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('runs.read'))):
     run = RunService(db).get_run(run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail='Run not found')
     return run
-@router.get("/project/{project_id}", response_model=List[RunOut])
-def list_runs_by_project(
-    project_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/project/{project_id}', response_model=List[RunOut])
+def list_runs_by_project(project_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('runs.read'))):
     runs = RunService(db).list_runs_by_project(project_id)
     return runs
-@router.patch("/{run_id}", response_model=RunOut)
-def update_run(
-    run_id: int,
-    run_in: RunUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    run = RunService(db).update_run(run_id, run_in.model_dump(exclude_unset=True))
+@router.patch('/{run_id}', response_model=RunOut)
+def update_run(run_id: int, run_in: RunUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('runs.write'))):
+    try:
+        run = RunService(db).update_run(run_id, run_in.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail='Run not found')
     return run
-@router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_run(
-    run_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{run_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_run(run_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     run = RunService(db).delete_run(run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=404, detail='Run not found')
 
 # File: ./backend/app/api/v1/suitcase.py
 from typing import List
@@ -2443,98 +1808,53 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.suitcase import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.suitcase import SuitcaseService
 from db.models.test_cases import TestCases
 from db.models.test_suites import TestSuites
-router = APIRouter(
-    prefix="/suitcases",
-    tags=["suitcases"],
-)
-@router.post("/", response_model=SuitcaseOut, status_code=status.HTTP_201_CREATED)
-def create_suitcase(
-    suitcase_in: SuitcaseCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/suitcases', tags=['suitcases'])
+@router.post('/', response_model=SuitcaseOut, status_code=status.HTTP_201_CREATED)
+def create_suitcase(suitcase_in: SuitcaseCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('suitcases.write'))):
     service = SuitcaseService(db)
     suitcase = service.create_suitcase(suitcase_in.model_dump())
     return suitcase
-@router.post("/bulk", response_model=SuitcaseBulkCreateOut, status_code=status.HTTP_201_CREATED)
-def create_suitcases_bulk(
-    bulk_in: SuitcaseBulkCreateIn,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    # Validate suite exists
+@router.post('/bulk', response_model=SuitcaseBulkCreateOut, status_code=status.HTTP_201_CREATED)
+def create_suitcases_bulk(bulk_in: SuitcaseBulkCreateIn, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('suitcases.write'))):
     suite = db.query(TestSuites).filter(TestSuites.id == bulk_in.test_suite_id).first()
     if not suite:
-        raise HTTPException(status_code=404, detail="Test suite not found")
-    # Validate all test case ids exist
-    found_ids = {
-        row.id
-        for row in db.query(TestCases.id)
-        .filter(TestCases.id.in_(bulk_in.test_case_ids))
-        .all()
-    }
+        raise HTTPException(status_code=404, detail='Test suite not found')
+    found_ids = {row.id for row in db.query(TestCases.id).filter(TestCases.id.in_(bulk_in.test_case_ids)).all()}
     missing = set(bulk_in.test_case_ids) - found_ids
     if missing:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Test cases not found: {sorted(missing)}",
-        )
-    result = SuitcaseService(db).create_suitcases_bulk(
-        test_suite_id=bulk_in.test_suite_id,
-        test_case_ids=bulk_in.test_case_ids,
-    )
+        raise HTTPException(status_code=404, detail=f'Test cases not found: {sorted(missing)}')
+    result = SuitcaseService(db).create_suitcases_bulk(test_suite_id=bulk_in.test_suite_id, test_case_ids=bulk_in.test_case_ids)
     return SuitcaseBulkCreateOut(**result)
-@router.get("/{suitcase_id}", response_model=SuitcaseOut)
-def get_suitcase(
-    suitcase_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{suitcase_id}', response_model=SuitcaseOut)
+def get_suitcase(suitcase_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('suitcases.read'))):
     suitcase = SuitcaseService(db).get_suitcase(suitcase_id)
     if not suitcase:
-        raise HTTPException(status_code=404, detail="Suitcase not found")
+        raise HTTPException(status_code=404, detail='Suitcase not found')
     return suitcase
-@router.get("/test-case/{test_case_id}", response_model=List[SuitcaseOut])
-def list_suitcases_by_test_case(
-    test_case_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/test-case/{test_case_id}', response_model=List[SuitcaseOut])
+def list_suitcases_by_test_case(test_case_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('suitcases.read'))):
     suitcases = SuitcaseService(db).get_suitcases_by_test_case_id(test_case_id)
     return suitcases
-@router.get("/test-suite/{test_suite_id}", response_model=List[SuitcaseOut])
-def list_suitcases_by_test_suite(
-    test_suite_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/test-suite/{test_suite_id}', response_model=List[SuitcaseOut])
+def list_suitcases_by_test_suite(test_suite_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('suitcases.read'))):
     suitcases = SuitcaseService(db).get_suitcases_by_test_suite_id(test_suite_id)
     return suitcases
-@router.patch("/{suitcase_id}", response_model=SuitcaseOut)
-def update_suitcase(
-    suitcase_id: int,
-    suitcase_in: SuitcaseUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.patch('/{suitcase_id}', response_model=SuitcaseOut)
+def update_suitcase(suitcase_id: int, suitcase_in: SuitcaseUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('suitcases.write'))):
     suitcase = SuitcaseService(db).update_suitcase(suitcase_id, suitcase_in.model_dump(exclude_unset=True))
     if not suitcase:
-        raise HTTPException(status_code=404, detail="Suitcase not found")
+        raise HTTPException(status_code=404, detail='Suitcase not found')
     return suitcase
-@router.delete("/{suitcase_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_suitcase(
-    suitcase_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{suitcase_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_suitcase(suitcase_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     suitcase = SuitcaseService(db).delete_suitcase(suitcase_id)
     if not suitcase:
-        raise HTTPException(status_code=404, detail="Suitcase not found")
+        raise HTTPException(status_code=404, detail='Suitcase not found')
 
 # File: ./backend/app/api/v1/status.py
 from typing import List, Optional
@@ -2542,95 +1862,108 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from app.schemas.status import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.status import StatusService
-router = APIRouter(
-    prefix="/status",
-    tags=["status"],
-)
-@router.post("/", response_model=StatusOut, status_code=status.HTTP_201_CREATED)
-def create_status(
-    status_in: StatusCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/status', tags=['status'])
+@router.post('/', response_model=StatusOut, status_code=status.HTTP_201_CREATED)
+def create_status(status_in: StatusCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('statuses.write'))):
     service = StatusService(db)
     return service.create_status(status_in.model_dump())
-@router.get("/{status_id}", response_model=StatusOut)
-def get_status(
-    status_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{status_id}', response_model=StatusOut)
+def get_status(status_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('statuses.read'))):
     status_obj = StatusService(db).get_status(status_id)
     if not status_obj:
-        raise HTTPException(status_code=404, detail="Status not found")
+        raise HTTPException(status_code=404, detail='Status not found')
     return status_obj
-@router.get("/", response_model=List[StatusOut])
-def list_statuses(
-    status_set_id: Optional[int] = Query(None, description="Filter by status set ID"),
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/', response_model=List[StatusOut])
+def list_statuses(status_set_id: Optional[int]=Query(None, description='Filter by status set ID'), db: Session=Depends(get_db), current_user: Users=Depends(permission_required('statuses.read'))):
     service = StatusService(db)
     if status_set_id is not None:
         return service.list_statuses_by_status_set(status_set_id)
     return service.list_all_statuses()
-@router.patch("/{status_id}", response_model=StatusOut)
-def update_status(
-    status_id: int,
-    status_in: StatusUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    status_obj = StatusService(db).update_status(
-        status_id, status_in.model_dump(exclude_unset=True)
-    )
+@router.patch('/{status_id}', response_model=StatusOut)
+def update_status(status_id: int, status_in: StatusUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('statuses.write'))):
+    status_obj = StatusService(db).update_status(status_id, status_in.model_dump(exclude_unset=True))
     if not status_obj:
-        raise HTTPException(status_code=404, detail="Status not found")
+        raise HTTPException(status_code=404, detail='Status not found')
     return status_obj
-@router.delete("/{status_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_status(
-    status_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{status_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_status(status_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     status_obj = StatusService(db).delete_status(status_id)
     if not status_obj:
-        raise HTTPException(status_code=404, detail="Status not found")
+        raise HTTPException(status_code=404, detail='Status not found')
+
+# File: ./backend/app/api/v1/permissions.py
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.schemas.permission import PermissionCreate, PermissionOut
+from db.models.users import Users
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from db.session import get_db
+from app.services.permission import PermissionService
+router = APIRouter(prefix='/permissions', tags=['permissions'])
+@router.get('/', response_model=List[PermissionOut])
+def list_permissions(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('permissions.read'))):
+    return PermissionService(db).list_permissions()
+@router.post('/', response_model=PermissionOut, status_code=status.HTTP_201_CREATED)
+def create_permission(perm_in: PermissionCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('permissions.write'))):
+    service = PermissionService(db)
+    if service.get_permission_by_code(perm_in.code):
+        raise HTTPException(status_code=400, detail='Permission code already exists')
+    return service.create_permission(perm_in.model_dump())
+@router.delete('/{permission_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_permission(permission_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('permissions.delete'))):
+    perm = PermissionService(db).delete_permission(permission_id)
+    if not perm:
+        raise HTTPException(status_code=404, detail='Permission not found')
 
 # File: ./backend/app/api/v1/attachment.py
+from typing import List
 from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.services.attachment import AttachmentService
-from app.schemas.attachment import AttachmentOut
+from app.schemas.attachment import AttachmentOut, AttachmentUpdate
 from db.session import get_db
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.models.users import Users
-router = APIRouter(
-    prefix="/attachments",
-    tags=["attachments"],
-)
-@router.post("/upload", response_model=AttachmentOut, status_code=status.HTTP_201_CREATED)
-async def upload_file(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/attachments', tags=['attachments'])
+@router.post('/upload', response_model=AttachmentOut, status_code=status.HTTP_201_CREATED)
+async def upload_file(file: UploadFile=File(...), db: Session=Depends(get_db), current_user: Users=Depends(permission_required('attachments.write'))):
     service = AttachmentService(db)
     attachment = await service.save_file(file, current_user.id)
     if not attachment:
-        raise HTTPException(status_code=400, detail="File could not be saved")
+        raise HTTPException(status_code=400, detail='File could not be saved')
     return attachment
-@router.delete("/delete", response_model=AttachmentOut)
-async def delete_file(
-    attachment_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user)
-):
+@router.get('/', response_model=List[AttachmentOut])
+def list_attachments(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('attachments.read'))):
+    return AttachmentService(db).list_attachments()
+@router.get('/{attachment_id}', response_model=AttachmentOut)
+def get_attachment(attachment_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('attachments.read'))):
+    attachment = AttachmentService(db).get_attachment(attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail='Attachment not found')
+    return attachment
+@router.patch('/{attachment_id}', response_model=AttachmentOut)
+async def update_attachment(attachment_id: int, attachment_in: AttachmentUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('attachments.write'))):
     service = AttachmentService(db)
-    return 0
+    data = attachment_in.model_dump(exclude_unset=True)
+    if not data:
+        attachment = service.get_attachment(attachment_id)
+        if not attachment:
+            raise HTTPException(status_code=404, detail='Attachment not found')
+        return attachment
+    attachment = await service.update_file_metadata(attachment_id, current_user.id, **data)
+    if not attachment:
+        raise HTTPException(status_code=404, detail='Attachment not found')
+    return attachment
+@router.delete('/{attachment_id}', status_code=status.HTTP_204_NO_CONTENT)
+async def delete_file_by_id(attachment_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
+    service = AttachmentService(db)
+    attachment = await service.delete_file(attachment_id)
+    if not attachment:
+        raise HTTPException(status_code=404, detail='Attachment not found')
 
 # File: ./backend/app/api/v1/status_set.py
 from typing import List
@@ -2638,59 +1971,34 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.status_set import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.status_set import StatusSetService
-router = APIRouter(
-    prefix="/status-sets",
-    tags=["status-sets"],
-)
-@router.post("/", response_model=StatusSetOut, status_code=status.HTTP_201_CREATED)
-def create_status_set(
-    status_set_in: StatusSetCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/status-sets', tags=['status-sets'])
+@router.post('/', response_model=StatusSetOut, status_code=status.HTTP_201_CREATED)
+def create_status_set(status_set_in: StatusSetCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('status_sets.write'))):
     service = StatusSetService(db)
     return service.create_status_set(status_set_in.model_dump())
-@router.get("/{status_set_id}", response_model=StatusSetOut)
-def get_status_set(
-    status_set_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{status_set_id}', response_model=StatusSetOut)
+def get_status_set(status_set_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('status_sets.read'))):
     status_set = StatusSetService(db).get_status_set(status_set_id)
     if not status_set:
-        raise HTTPException(status_code=404, detail="Status set not found")
+        raise HTTPException(status_code=404, detail='Status set not found')
     return status_set
-@router.get("/", response_model=List[StatusSetOut])
-def list_status_sets(
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/', response_model=List[StatusSetOut])
+def list_status_sets(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('status_sets.read'))):
     return StatusSetService(db).list_status_sets()
-@router.patch("/{status_set_id}", response_model=StatusSetOut)
-def update_status_set(
-    status_set_id: int,
-    status_set_in: StatusSetUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    status_set = StatusSetService(db).update_status_set(
-        status_set_id, status_set_in.model_dump(exclude_unset=True)
-    )
+@router.patch('/{status_set_id}', response_model=StatusSetOut)
+def update_status_set(status_set_id: int, status_set_in: StatusSetUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('status_sets.write'))):
+    status_set = StatusSetService(db).update_status_set(status_set_id, status_set_in.model_dump(exclude_unset=True))
     if not status_set:
-        raise HTTPException(status_code=404, detail="Status set not found")
+        raise HTTPException(status_code=404, detail='Status set not found')
     return status_set
-@router.delete("/{status_set_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_status_set(
-    status_set_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{status_set_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_status_set(status_set_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     status_set = StatusSetService(db).delete_status_set(status_set_id)
     if not status_set:
-        raise HTTPException(status_code=404, detail="Status set not found")
+        raise HTTPException(status_code=404, detail='Status set not found')
 
 # File: ./backend/app/api/v1/user_group.py
 from typing import List
@@ -2698,62 +2006,78 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.user_group import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.user_group import UserGroupService
-router = APIRouter(
-    prefix="/user-groups",
-    tags=["user-groups"],
-)
-@router.post("/", response_model=UserGroupOut, status_code=status.HTTP_201_CREATED)
-def create_user_group(
-    group_in: UserGroupCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/user-groups', tags=['user-groups'])
+@router.post('/', response_model=UserGroupOut, status_code=status.HTTP_201_CREATED)
+def create_user_group(group_in: UserGroupCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('user_groups.write'))):
     service = UserGroupService(db)
-    # Auto-set created_by_id to the current user
     data = group_in.model_dump()
-    data["created_by_id"] = current_user.id
-    return service.create_user_group(data)
-@router.get("/{group_id}", response_model=UserGroupOut)
-def get_user_group(
-    group_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+    data['created_by_id'] = current_user.id
+    try:
+        return service.create_user_group(data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+@router.get('/{group_id}', response_model=UserGroupOut)
+def get_user_group(group_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('user_groups.read'))):
     group = UserGroupService(db).get_user_group(group_id)
     if not group:
-        raise HTTPException(status_code=404, detail="User group not found")
+        raise HTTPException(status_code=404, detail='User group not found')
     return group
-@router.get("/", response_model=List[UserGroupOut])
-def list_user_groups(
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/', response_model=List[UserGroupOut])
+def list_user_groups(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('user_groups.read'))):
     return UserGroupService(db).list_user_groups()
-@router.patch("/{group_id}", response_model=UserGroupOut)
-def update_user_group(
-    group_id: int,
-    group_in: UserGroupUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
-    group = UserGroupService(db).update_user_group(
-        group_id, group_in.model_dump(exclude_unset=True)
-    )
+@router.patch('/{group_id}', response_model=UserGroupOut)
+def update_user_group(group_id: int, group_in: UserGroupUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('user_groups.write'))):
+    group = UserGroupService(db).update_user_group(group_id, group_in.model_dump(exclude_unset=True))
     if not group:
-        raise HTTPException(status_code=404, detail="User group not found")
+        raise HTTPException(status_code=404, detail='User group not found')
     return group
-@router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user_group(
-    group_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{group_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_user_group(group_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     group = UserGroupService(db).delete_user_group(group_id)
     if not group:
-        raise HTTPException(status_code=404, detail="User group not found")
+        raise HTTPException(status_code=404, detail='User group not found')
+
+# File: ./backend/app/api/v1/relation_type.py
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.schemas.relation_type import RelationTypeCreate, RelationTypeOut
+from db.models.users import Users
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from db.session import get_db
+from app.services.relation_type import RelationTypeService
+router = APIRouter(prefix='/relation-types', tags=['relation-types'])
+@router.post('/', response_model=RelationTypeOut, status_code=status.HTTP_201_CREATED)
+def create_relation_type(type_in: RelationTypeCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('relation_types.write'))):
+    service = RelationTypeService(db)
+    return service.create_relation_type(type_in.model_dump())
+@router.get('/', response_model=List[RelationTypeOut])
+def list_relation_types(db: Session=Depends(get_db), current_user: Users=Depends(permission_required('relation_types.read'))):
+    service = RelationTypeService(db)
+    return service.list_relation_types()
+@router.get('/{type_id}', response_model=RelationTypeOut)
+def get_relation_type(type_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('relation_types.read'))):
+    service = RelationTypeService(db)
+    rel_type = service.get_relation_type(type_id)
+    if not rel_type:
+        raise HTTPException(status_code=404, detail='Relation type not found')
+    return rel_type
+@router.patch('/{type_id}', response_model=RelationTypeOut)
+def update_relation_type(type_id: int, type_in: RelationTypeCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('relation_types.write'))):
+    service = RelationTypeService(db)
+    rel_type = service.update_relation_type(type_id, type_in.model_dump())
+    if not rel_type:
+        raise HTTPException(status_code=404, detail='Relation type not found')
+    return rel_type
+@router.delete('/{type_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_relation_type(type_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
+    service = RelationTypeService(db)
+    rel_type = service.delete_relation_type(type_id)
+    if not rel_type:
+        raise HTTPException(status_code=404, detail='Relation type not found')
 
 # File: ./backend/app/api/v1/device.py
 from typing import List
@@ -2761,63 +2085,65 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.device import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.device import DeviceService
-router = APIRouter(
-    prefix="/devices",
-    tags=["devices"],
-)
-@router.post("/", response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
-def create_device(
-    device_in: DeviceCreate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+router = APIRouter(prefix='/devices', tags=['devices'])
+@router.post('/', response_model=DeviceOut, status_code=status.HTTP_201_CREATED)
+def create_device(device_in: DeviceCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('devices.write'))):
     service = DeviceService(db)
     device = service.create_device(device_in.model_dump())
     return device
-@router.get("/{device_id}", response_model=DeviceOut)
-def get_device(
-    device_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/{device_id}', response_model=DeviceOut)
+def get_device(device_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('devices.read'))):
     device = DeviceService(db).get_device(device_id)
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail='Device not found')
     return device
-@router.get("/project/{project_id}", response_model=List[DeviceOut])
-def list_devices_by_project(
-    project_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.get('/project/{project_id}', response_model=List[DeviceOut])
+def list_devices_by_project(project_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('devices.read'))):
     devices = DeviceService(db).list_devices_by_project(project_id)
     return devices
-@router.patch("/{device_id}", response_model=DeviceOut)
-def update_device(
-    device_id: int,
-    device_in: DeviceUpdate,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
-):
+@router.patch('/{device_id}', response_model=DeviceOut)
+def update_device(device_id: int, device_in: DeviceUpdate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('devices.write'))):
     device = DeviceService(db).update_device(device_id, device_in.model_dump(exclude_unset=True))
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail='Device not found')
     return device
-@router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_device(
-    device_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
+@router.delete('/{device_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_device(device_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
     device = DeviceService(db).delete_device(device_id)
     if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
+        raise HTTPException(status_code=404, detail='Device not found')
+
+# File: ./backend/app/api/v1/execution_relationship.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.schemas.execution_relationship import ExecutionRelationshipCreate, ExecutionRelationshipOut
+from db.session import get_db
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from db.models.users import Users
+from app.services.execution_relationship import ExecutionRelationshipService
+router = APIRouter(prefix='/execution-relationships', tags=['execution-relationships'])
+@router.post('/', response_model=ExecutionRelationshipOut, status_code=status.HTTP_201_CREATED)
+def create_relationship(rel_in: ExecutionRelationshipCreate, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('execution_relationships.write'))):
+    service = ExecutionRelationshipService(db)
+    rel = service.create_relationship(execution_id=rel_in.execution_id, related_execution_id=rel_in.related_execution_id, relation_type_id=rel_in.relation_type_id)
+    return rel
+@router.get('/execution/{execution_id}', response_model=list[ExecutionRelationshipOut])
+def list_relationships(execution_id: int, db: Session=Depends(get_db), current_user: Users=Depends(permission_required('execution_relationships.read'))):
+    service = ExecutionRelationshipService(db)
+    return service.get_relationships_for_execution(execution_id)
+@router.delete('/{relationship_id}', status_code=status.HTTP_204_NO_CONTENT)
+def delete_relationship(relationship_id: int, db: Session=Depends(get_db), current_user: Users=Depends(get_current_admin_user)):
+    service = ExecutionRelationshipService(db)
+    success = service.delete_relationship(relationship_id)
+    if not success:
+        raise HTTPException(status_code=404, detail='Relationship not found')
 
 # File: ./backend/app/schemas/auth.py
 from pydantic import BaseModel, EmailStr, Field
+from app.schemas.common import BaseSchema
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
@@ -2830,9 +2156,9 @@ class UserLogout(BaseModel):
     pass
 class Token(BaseModel):
     access_token: str
-    token_type: str = "bearer"
-class TokenPayload(BaseModel):
-    sub: int   # user id
+    token_type: str = 'bearer'
+class TokenPayload(BaseSchema):
+    sub: int
     exp: int
 
 # File: ./backend/app/schemas/execution.py
@@ -2855,12 +2181,24 @@ class ExecutionCreate(BaseModel):
 class ExecutionUpdate(BaseModel):
     status_id: Optional[int] = None
     attachment_id: Optional[int] = None
+    resolution_id: Optional[int] = None
     actual_result: Optional[str] = None
 class ExecutionOut(ExecutionBase):
     id: int
+    assigned_to: Optional[int] = None
     executed_by: Optional[int] = None
+    updated_by: Optional[int] = None
+    started_at: Optional[datetime] = None
     executed_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
+class ExecutionAssign(BaseModel):
+    user_id: int = Field(..., description='User ID to assign the execution to')
+class ExecutionBulkAssign(BaseModel):
+    execution_ids: list[int] = Field(..., min_length=1, description='List of execution IDs to assign')
+    user_id: int = Field(..., description='User ID to assign all executions to')
+class ExecutionStart(BaseModel):
+    pass
 
 # File: ./backend/app/schemas/test_case_version.py
 from pydantic import BaseModel, Field, ConfigDict
@@ -2874,8 +2212,6 @@ class TestCaseVersionBase(BaseModel):
     steps: Optional[str] = None
     expected_result: Optional[str] = None
     release_ready: bool = False
-class TestCaseVersionCreate(TestCaseVersionBase):
-    created_by: int
 class TestCaseVersionUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -2890,30 +2226,28 @@ class TestCaseVersionOut(TestCaseVersionBase):
 
 # File: ./backend/app/schemas/users.py
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field
+from app.schemas.common import BaseSchema
 class UserCreate(BaseModel):
     email: EmailStr
-    first_name: str
-    last_name: str
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
     password: str = Field(..., min_length=8)
 class UserUpdateSelf(BaseModel):
-    first_name: str | None = None
-    last_name: str | None = None
+    first_name: str | None = Field(None, min_length=1, max_length=100)
+    last_name: str | None = Field(None, min_length=1, max_length=100)
     email: EmailStr | None = None
     password: str | None = Field(None, min_length=8)
 class UserUpdateAdmin(BaseModel):
-    user_group_id: int | None = None
     user_type_id: int | None = None
     active: bool | None = None
-class UserOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class UserOut(BaseSchema):
     id: int
-    email: EmailStr
+    email: str
     first_name: str
     last_name: str
     active: bool
     user_type_id: int
-    user_group_id: int | None
     created_at: datetime
     last_login_at: datetime | None
 
@@ -2950,24 +2284,20 @@ class TestCaseOut(TestCaseBase):
 class TestCaseWithVersionCreate(BaseModel):
     scenario_id: int
     status_set_id: int
-    # Version fields (always version=1 for new test cases)
     name: Optional[str] = None
     description: Optional[str] = None
     steps: Optional[str] = None
     expected_result: Optional[str] = None
     release_ready: bool = False
 class TestCaseWithVersionOut(BaseModel):
-    """What we return for each created item."""
     test_case_id: int
     test_case_version_id: int
     version: int
     model_config = ConfigDict(from_attributes=True)
 class TestCaseBulkCreateIn(BaseModel):
-    """Request body for POST /test-cases/bulk."""
     test_suite_id: Optional[int] = None
     test_cases: List[TestCaseWithVersionCreate] = Field(..., min_length=1)
 class TestCaseBulkCreateOut(BaseModel):
-    """Response body for POST /test-cases/bulk."""
     created: List[TestCaseWithVersionOut]
 
 # File: ./backend/app/schemas/client.py
@@ -3003,8 +2333,18 @@ class ProjectOut(ProjectBase):
     client_id: int
     model_config = ConfigDict(from_attributes=True)
 class ProjectWithClient(ProjectOut):
-    client_id: int
     model_config = ConfigDict(from_attributes=True)
+
+# File: ./backend/app/schemas/group_permission.py
+from pydantic import BaseModel, ConfigDict
+from .permission import PermissionOut
+class GroupPermissionCreate(BaseModel):
+    group_id: int
+    permission_id: int
+class GroupPermissionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    group_id: int
+    permission_id: int
 
 # File: ./backend/app/schemas/scenario.py
 from pydantic import BaseModel, Field, ConfigDict
@@ -3031,6 +2371,22 @@ class UserTypeUpdate(BaseModel):
 class UserTypeOut(UserTypeBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
+
+# File: ./backend/app/schemas/common.py
+from pydantic import BaseModel, ConfigDict
+class BaseSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+# File: ./backend/app/schemas/permission.py
+from pydantic import BaseModel, ConfigDict, Field
+class PermissionCreate(BaseModel):
+    code: str = Field(..., max_length=100)
+    description: str = Field(..., max_length=255)
+class PermissionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    code: str
+    description: str
 
 # File: ./backend/app/schemas/test_suite.py
 from pydantic import BaseModel, Field, ConfigDict
@@ -3111,23 +2467,21 @@ class StatusOut(StatusBase):
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Dict, Any
 from datetime import datetime
-'''
-class AttachmentBase(BaseModel):
-    resolution_id: Optional[int] = None
-    settings: Optional[Dict[str, Any]] = None
-'''
-'''
-class AttachmentUploadForm(BaseModel):
-    resolution_id: Optional[int] = Field(None, form=True)
-    settings: Optional[str] = Field(None, form=True)
-    presentmon_version: Optional[str] = Field(None, form=True)
-'''
+'\nclass AttachmentBase(BaseModel):\n    resolution_id: Optional[int] = None\n    settings: Optional[Dict[str, Any]] = None\n'
+'\nclass AttachmentUploadForm(BaseModel):\n    resolution_id: Optional[int] = Field(None, form=True)\n    settings: Optional[str] = Field(None, form=True)\n    presentmon_version: Optional[str] = Field(None, form=True)\n'
+class AttachmentUpdate(BaseModel):
+    filename: Optional[str] = None
+    parent_attachment_id: Optional[int] = None
 class AttachmentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     uploaded_at: datetime
     uploaded_by: int
     filename: str
+    relative_path: Optional[str] = None
+    edited_by: Optional[int] = None
+    edited_at: Optional[datetime] = None
+    parent_attachment_id: Optional[int] = None
 
 # File: ./backend/app/schemas/status_set.py
 from pydantic import BaseModel, Field, ConfigDict
@@ -3156,6 +2510,15 @@ class UserGroupOut(UserGroupBase):
     created_by_id: int
     model_config = ConfigDict(from_attributes=True)
 
+# File: ./backend/app/schemas/relation_type.py
+from pydantic import BaseModel, ConfigDict
+class RelationTypeCreate(BaseModel):
+    name: str
+class RelationTypeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+
 # File: ./backend/app/schemas/device.py
 from pydantic import BaseModel, Field, ConfigDict
 class DeviceBase(BaseModel):
@@ -3163,7 +2526,7 @@ class DeviceBase(BaseModel):
     name_internal: str | None = Field(None, max_length=255)
     cpu: str | None = Field(None, max_length=255)
     gpu: str | None = Field(None, max_length=255)
-    ram: int | None = None
+    ram: int | str | None = None
     project_id: int
 class DeviceCreate(DeviceBase):
     pass
@@ -3172,7 +2535,7 @@ class DeviceUpdate(BaseModel):
     name_internal: str | None = Field(None, max_length=255)
     cpu: str | None = Field(None, max_length=255)
     gpu: str | None = Field(None, max_length=255)
-    ram: int | None = None
+    ram: int | str | None = None
     project_id: int | None = None
 class DeviceOut(DeviceBase):
     id: int
@@ -3180,6 +2543,30 @@ class DeviceOut(DeviceBase):
     name_internal: str | None
     cpu: str | None
     gpu: str | None
-    ram: int | None
+    ram: str | None
     model_config = ConfigDict(from_attributes=True)
+
+# File: ./backend/app/schemas/execution_relationship.py
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
+class ExecutionRelationshipCreate(BaseModel):
+    execution_id: int
+    related_execution_id: int
+    relation_type_id: int
+class ExecutionRelationshipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    execution_id: int
+    related_execution_id: int
+    relation_type_id: int
+
+# File: ./backend/app/schemas/group_membership.py
+from pydantic import BaseModel, ConfigDict
+class GroupMembershipCreate(BaseModel):
+    group_id: int
+    user_id: int
+class GroupMembershipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    group_id: int
+    user_id: int
 

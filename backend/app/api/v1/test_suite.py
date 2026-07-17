@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.test_suite import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.test_suite import TestSuiteService
 
@@ -18,7 +18,7 @@ router = APIRouter(
 def create_test_suite(
     test_suite_in: TestSuiteCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_suites.write")),
 ):
     service = TestSuiteService(db)
     test_suite = service.create_test_suite(test_suite_in.model_dump())
@@ -29,7 +29,7 @@ def create_test_suite(
 def get_test_suite(
     test_suite_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_suites.read")),
 ):
     test_suite = TestSuiteService(db).get_test_suite(test_suite_id)
     if not test_suite:
@@ -40,7 +40,7 @@ def get_test_suite(
 @router.get("/", response_model=List[TestSuiteOut])
 def list_test_suites(
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_suites.read")),
 ):
     service = TestSuiteService(db)
     test_suites = service.list_test_suites()
@@ -51,7 +51,7 @@ def list_test_suites(
 def get_test_suite_by_name(
     name: str,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_suites.read")),
 ):
     """Look up a test suite by its unique name.
  
@@ -69,7 +69,7 @@ def update_test_suite(
     test_suite_id: int,
     test_suite_in: TestSuiteUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_suites.write")),
 ):
     test_suite = TestSuiteService(db).update_test_suite(test_suite_id, test_suite_in.model_dump(exclude_unset=True))
     if not test_suite:

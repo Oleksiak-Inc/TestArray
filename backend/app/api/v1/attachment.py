@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.services.attachment import AttachmentService
 from app.schemas.attachment import AttachmentOut, AttachmentUpdate
 from db.session import get_db
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.models.users import Users
 
 
@@ -17,7 +17,7 @@ router = APIRouter(
 async def upload_file(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("attachments.write")),
 ):
     service = AttachmentService(db)
     attachment = await service.save_file(file, current_user.id)
@@ -29,7 +29,7 @@ async def upload_file(
 @router.get("/", response_model=List[AttachmentOut])
 def list_attachments(
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("attachments.read")),
 ):
     return AttachmentService(db).list_attachments()
 
@@ -38,7 +38,7 @@ def list_attachments(
 def get_attachment(
     attachment_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("attachments.read")),
 ):
     attachment = AttachmentService(db).get_attachment(attachment_id)
     if not attachment:
@@ -51,7 +51,7 @@ async def update_attachment(
     attachment_id: int,
     attachment_in: AttachmentUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("attachments.write")),
 ):
     service = AttachmentService(db)
     data = attachment_in.model_dump(exclude_unset=True)
@@ -62,19 +62,6 @@ async def update_attachment(
         return attachment
 
     attachment = await service.update_file_metadata(attachment_id, current_user.id, **data)
-    if not attachment:
-        raise HTTPException(status_code=404, detail="Attachment not found")
-    return attachment
-
-
-@router.delete("/delete", response_model=AttachmentOut)
-async def delete_file(
-    attachment_id: int,
-    db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
-):
-    service = AttachmentService(db)
-    attachment = await service.delete_file(attachment_id)
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
     return attachment

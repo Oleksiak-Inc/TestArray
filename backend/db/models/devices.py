@@ -7,11 +7,11 @@ class Devices(Base):
 
     id = Column(Integer, primary_key=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
-    name_external = Column(String)
-    name_internal = Column(String)
-    cpu = Column(String)
-    gpu = Column(String)
-    ram = Column(String)
+    name_external = Column(String(255))
+    name_internal = Column(String(255))
+    cpu = Column(String(255))
+    gpu = Column(String(255))
+    ram = Column(String(255))
 
     project = relationship("Projects", back_populates="devices", foreign_keys=[project_id])
     executions = relationship("Executions", back_populates="device", foreign_keys="Executions.device_id")

@@ -10,7 +10,7 @@ class UserGroups(Base):
     created_by_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
     owner_id = Column(Integer, ForeignKey("users.id", use_alter=True), nullable=False)
 
-    name = Column(String, unique=True)
+    name = Column(String(255), unique=True, nullable=False)
 
     # ---- relationships ----
     created_by = relationship(
@@ -26,9 +26,14 @@ class UserGroups(Base):
     )
 
     members = relationship(
-        "Users",
-        foreign_keys="Users.user_group_id",
-        back_populates="user_group"
+        "GroupsMembers",
+        back_populates="group"
+    )
+
+    group_permissions = relationship(
+        "GroupPermissions",
+        back_populates="group",
+        cascade="all, delete-orphan",
     )
 
     __table_args__ = (

@@ -1,5 +1,4 @@
-from sqlalchemy.orm import Session, joinedload
-from db.models.clients import Clients
+from sqlalchemy.orm import joinedload
 from db.models.executions import Executions
 from db.models.projects import Projects
 from db.models.runs import Runs

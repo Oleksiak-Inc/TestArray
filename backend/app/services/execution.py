@@ -1,8 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy.orm import joinedload
-
 from db.models.attachments import Attachments
 from db.models.devices import Devices
 from db.models.executions import Executions
@@ -10,8 +8,9 @@ from db.models.resolutions import Resolutions
 from db.models.runs import Runs
 from db.models.statuses import Statuses
 from db.models.suitcases import Suitcases
-from db.models.test_case_versions import TestCaseVersions
 from db.models.test_suites import TestSuites
+from db.models.user_types import UserTypes
+from db.models.users import Users
 from app.services.test_case_version import TestCaseVersionService
 from .utils.service import BaseService
 
@@ -39,6 +38,8 @@ class ExecutionService(BaseService):
             raise ValueError("Run not found")
 
         devices = self.db.query(Devices).filter(Devices.id.in_(device_ids)).all()
+        if len(device_ids) != len(set(device_ids)):
+            raise ValueError("Duplicate device IDs are not allowed")
         if len(devices) != len(set(device_ids)):
             raise ValueError("One or more devices were not found")
 
@@ -150,3 +151,40 @@ class ExecutionService(BaseService):
         if not execution:
             return None
         return self.delete(execution)
+
+    def assign_execution(self, execution_id: int, user_id: int):
+        execution = self.get_execution(execution_id)
+        if not execution:
+            return None
+        user = self.db.query(Users).filter(Users.id == user_id).first()
+        if not user:
+            return None
+        execution.assigned_to = user_id
+        self.commit()
+        return execution
+
+    def assign_executions_bulk(self, execution_ids: list[int], user_id: int):
+        user = self.db.query(Users).filter(Users.id == user_id).first()
+        if not user:
+            return None
+        executions = self.db.query(Executions).filter(Executions.id.in_(execution_ids)).all()
+        if len(executions) != len(execution_ids):
+            return None
+        for execution in executions:
+            execution.assigned_to = user_id
+        self.commit()
+        return executions
+
+    def start_execution(self, execution_id: int, current_user: Any):
+        execution = self.get_execution(execution_id)
+        if not execution:
+            return None
+        admin_type = self.db.query(UserTypes).filter(UserTypes.name == 'admin').first()
+        is_admin = admin_type is not None and current_user.user_type_id == admin_type.id
+        if not is_admin and execution.assigned_to != current_user.id:
+            raise ValueError('Only the assigned user or an admin can start this execution')
+        if execution.started_at is not None:
+            raise ValueError('Execution has already been started')
+        execution.started_at = datetime.now(timezone.utc)
+        self.commit()
+        return execution

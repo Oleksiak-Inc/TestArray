@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.test_case import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.test_case import TestCaseService
 
@@ -18,7 +18,7 @@ router = APIRouter(
 def create_test_case(
     test_case_in: TestCaseCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_cases.write")),
 ):
     service = TestCaseService(db)
     test_case = service.create_test_case(test_case_in.model_dump())
@@ -29,7 +29,7 @@ def create_test_case(
 def create_test_cases_bulk(
     bulk_in: TestCaseBulkCreateIn,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_cases.write")),
 ):
     items = [tc.model_dump() for tc in bulk_in.test_cases]
     results = TestCaseService(db).create_test_cases_and_versions_bulk(
@@ -44,7 +44,7 @@ def create_test_cases_bulk(
 def get_test_case(
     test_case_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_cases.read")),
 ):
     test_case = TestCaseService(db).get_test_case(test_case_id)
     if not test_case:
@@ -55,7 +55,7 @@ def get_test_case(
 @router.get("/", response_model=List[TestCaseOut])
 def list_test_cases(
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_cases.read")),
 ):
     service = TestCaseService(db)
     test_cases = service.list_test_cases()
@@ -67,7 +67,7 @@ def update_test_case(
     test_case_id: int,
     test_case_in: TestCaseUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("test_cases.write")),
 ):
     test_case = TestCaseService(db).update_test_case(test_case_id, test_case_in.model_dump(exclude_unset=True))
     if not test_case:

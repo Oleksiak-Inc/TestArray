@@ -13,8 +13,8 @@ class Attachments(Base):
     #resolution_id = Column(Integer, ForeignKey("resolutions.id"), nullable=True)
     edited_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    filename = Column(String)
-    relative_path = Column(String)
+    filename = Column(String(255))
+    relative_path = Column(String(512))
 
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
     edited_at = Column(DateTime(timezone=True), onupdate=func.now())

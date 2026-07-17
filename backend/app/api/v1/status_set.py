@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.status_set import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.status_set import StatusSetService
 
@@ -18,7 +18,7 @@ router = APIRouter(
 def create_status_set(
     status_set_in: StatusSetCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("status_sets.write")),
 ):
     service = StatusSetService(db)
     return service.create_status_set(status_set_in.model_dump())
@@ -28,7 +28,7 @@ def create_status_set(
 def get_status_set(
     status_set_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("status_sets.read")),
 ):
     status_set = StatusSetService(db).get_status_set(status_set_id)
     if not status_set:
@@ -39,7 +39,7 @@ def get_status_set(
 @router.get("/", response_model=List[StatusSetOut])
 def list_status_sets(
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("status_sets.read")),
 ):
     return StatusSetService(db).list_status_sets()
 
@@ -49,7 +49,7 @@ def update_status_set(
     status_set_id: int,
     status_set_in: StatusSetUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("status_sets.write")),
 ):
     status_set = StatusSetService(db).update_status_set(
         status_set_id, status_set_in.model_dump(exclude_unset=True)

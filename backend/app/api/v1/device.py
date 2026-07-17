@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.device import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.device import DeviceService
 
@@ -18,7 +18,7 @@ router = APIRouter(
 def create_device(
     device_in: DeviceCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("devices.write")),
 ):
     service = DeviceService(db)
     device = service.create_device(device_in.model_dump())
@@ -29,7 +29,7 @@ def create_device(
 def get_device(
     device_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("devices.read")),
 ):
     device = DeviceService(db).get_device(device_id)
     if not device:
@@ -41,7 +41,7 @@ def get_device(
 def list_devices_by_project(
     project_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("devices.read")),
 ):
     devices = DeviceService(db).list_devices_by_project(project_id)
     return devices
@@ -52,7 +52,7 @@ def update_device(
     device_id: int,
     device_in: DeviceUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("devices.write")),
 ):
     device = DeviceService(db).update_device(device_id, device_in.model_dump(exclude_unset=True))
     if not device:

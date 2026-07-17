@@ -1,6 +1,5 @@
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import joinedload
 from db.models.devices import Devices
-from db.models.projects import Projects
 from .utils.service import BaseService
 
 

@@ -6,7 +6,7 @@ class Runs(Base):
     __tablename__ = "runs"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String)
+    name = Column(String(255), nullable=False)
 
     started_at = Column(DateTime(timezone=True))
     done_at = Column(DateTime(timezone=True))

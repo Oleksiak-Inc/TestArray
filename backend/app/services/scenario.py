@@ -1,5 +1,4 @@
 from db.models.scenarios import Scenarios
-from sqlalchemy.orm import Session
 from .utils.service import BaseService
 
 

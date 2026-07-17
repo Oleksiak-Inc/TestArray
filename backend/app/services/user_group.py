@@ -1,5 +1,6 @@
 from db.models.user_groups import UserGroups
 from .utils.service import BaseService
+from db.models.users import Users
 
 
 class UserGroupService(BaseService):
@@ -13,6 +14,9 @@ class UserGroupService(BaseService):
         return self.db.query(UserGroups).all()
 
     def create_user_group(self, group_data: dict):
+        owner = self.db.query(Users).filter(Users.id == group_data["owner_id"]).first()
+        if not owner:
+            raise ValueError("Owner user not found")
         return self.create(UserGroups, group_data)
 
     def update_user_group(self, group_id: int, group_data: dict):

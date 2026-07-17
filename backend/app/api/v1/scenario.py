@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.scenario import *
 from db.models.users import Users
-from app.api.utils.users import get_current_user, get_current_admin_user
+from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
 from db.session import get_db
 from app.services.scenario import ScenarioService
 
@@ -18,7 +18,7 @@ router = APIRouter(
 def create_scenario(
     scenario_in: ScenarioCreate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("scenarios.write")),
 ):
     service = ScenarioService(db)
     return service.create_scenario(scenario_in.model_dump())
@@ -28,7 +28,7 @@ def create_scenario(
 def get_scenario(
     scenario_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("scenarios.read")),
 ):
     scenario = ScenarioService(db).get_scenario(scenario_id)
     if not scenario:
@@ -39,7 +39,7 @@ def get_scenario(
 @router.get("/", response_model=List[ScenarioOut])
 def list_scenarios(
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("scenarios.read")),
 ):
     return ScenarioService(db).list_scenarios()
 
@@ -49,7 +49,7 @@ def update_scenario(
     scenario_id: int,
     scenario_in: ScenarioUpdate,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_user),
+    current_user: Users = Depends(permission_required("scenarios.write")),
 ):
     scenario = ScenarioService(db).update_scenario(
         scenario_id, scenario_in.model_dump(exclude_unset=True)

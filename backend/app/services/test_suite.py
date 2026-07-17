@@ -1,10 +1,8 @@
 from db.models.test_suites import TestSuites
-from db.models.test_cases import TestCases
 from db.models.suitcases import Suitcases
-from db.models.test_case_versions import TestCaseVersions
 
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import select, text
+from sqlalchemy.orm import joinedload
+from sqlalchemy import text
 from .utils.service import BaseService
 
 class TestSuiteService(BaseService):
@@ -28,7 +26,7 @@ class TestSuiteService(BaseService):
                         ts.id AS suite_id,
                         ts.name AS suite_name,
                         tc.id AS test_case_id,
-                        tc.name AS test_case_name,
+                        tcv.name AS test_case_name,
                         tcv.id AS version_id,
                         tcv.created_at
                     FROM test_suites ts

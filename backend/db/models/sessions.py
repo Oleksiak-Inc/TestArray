@@ -8,7 +8,7 @@ class Sessions(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    token = Column(String, nullable=False, unique=True)
+    token = Column(String(64), nullable=False, unique=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False)
 

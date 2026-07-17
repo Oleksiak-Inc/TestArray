@@ -1,32 +1,34 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field
+
+from app.schemas.common import BaseSchema
 
 
 class UserCreate(BaseModel):
     email: EmailStr
-    first_name: str
-    last_name: str
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: str = Field(..., min_length=1, max_length=100)
     password: str = Field(..., min_length=8)
 
+
 class UserUpdateSelf(BaseModel):
-    first_name: str | None = None
-    last_name: str | None = None
+    first_name: str | None = Field(None, min_length=1, max_length=100)
+    last_name: str | None = Field(None, min_length=1, max_length=100)
     email: EmailStr | None = None
     password: str | None = Field(None, min_length=8)
 
+
 class UserUpdateAdmin(BaseModel):
-    user_group_id: int | None = None
     user_type_id: int | None = None
     active: bool | None = None
 
-class UserOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+
+class UserOut(BaseSchema):
     id: int
-    email: EmailStr
+    email: str
     first_name: str
     last_name: str
     active: bool
     user_type_id: int
-    user_group_id: int | None
     created_at: datetime
     last_login_at: datetime | None

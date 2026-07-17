@@ -6,7 +6,7 @@ class StatusSets(Base):
     __tablename__ = "status_sets"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True)
+    name = Column(String(255), unique=True, nullable=False)
 
     statuses = relationship(
         "Statuses",

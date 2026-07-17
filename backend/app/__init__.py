@@ -6,7 +6,6 @@ from core.startup import init_db
 from app.api import api_router
 from starlette.middleware.cors import CORSMiddleware
 
-FRONTEND_ORIGINS = getenv("FRONTEND_ORIGINS", "").split(",")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -16,18 +15,21 @@ async def lifespan(app: FastAPI):
     # Shutdown logic (if any) would go here
 
 def create_app() -> FastAPI:
+
+    frontend_origins = settings.FRONTEND_ORIGINS.split(",")
+
     app = FastAPI(
         title=settings.APP_NAME,
         version="1.0.0",
         docs_url=f"{settings.API_V1_STR}/docs",
         redoc_url=f"{settings.API_V1_STR}/redoc",
         openapi_url=f"{settings.API_V1_STR}/openapi.json",
-        lifespan=lifespan,                     # ✅ modern approach
+        lifespan=lifespan,
     )
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=FRONTEND_ORIGINS,
+        allow_origins=frontend_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

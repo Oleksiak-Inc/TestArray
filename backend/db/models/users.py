@@ -7,12 +7,12 @@ class Users(Base):
 
     id = Column(Integer, primary_key=True)
     # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
-    user_group_id = Column(Integer, ForeignKey("user_groups.id", use_alter=True), nullable=True)
+    #user_group_id = Column(Integer, ForeignKey("user_groups.id", use_alter=True), nullable=True)
     user_type_id = Column(Integer, ForeignKey("user_types.id"), nullable=False)
-    first_name = Column(String, nullable=False)
-    last_name = Column(String, nullable=False)
-    email = Column(String, nullable=False, unique=True)
-    password = Column(String, nullable=False)
+    first_name = Column(String(255), nullable=False)
+    last_name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False, unique=True)
+    password = Column(String(255), nullable=False)
 
     active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -24,10 +24,9 @@ class Users(Base):
         foreign_keys=[user_type_id], 
         back_populates="users")
 
-    user_group = relationship(
-        "UserGroups",
-        foreign_keys=[user_group_id],
-        back_populates="members"
+    groups_member = relationship(
+        "GroupsMembers",
+        back_populates="user"
     )
 
     groups_created = relationship(
@@ -62,7 +61,12 @@ class Users(Base):
         foreign_keys="Executions.updated_by",
         back_populates="updater"
     )
-    
+    assigned_executions = relationship(
+        "Executions",
+        foreign_keys="Executions.assigned_to",
+        back_populates="assignee"
+    )
+
     created_test_case_versions = relationship(
         "TestCaseVersions", 
         foreign_keys="TestCaseVersions.created_by", 
@@ -73,7 +77,13 @@ class Users(Base):
         foreign_keys="Sessions.user_id", 
         back_populates="user")
     
+    projects = relationship(
+        "Projects",
+        foreign_keys="Projects.owner_id",
+        back_populates="owner"
+    )
+
     __table_args__ = (
         Index("user_user_type_idx", "user_type_id"),
-        Index("user_user_group_idx", "user_group_id"),
+        #Index("user_user_group_idx", "user_group_id"),
     )

@@ -1,5 +1,4 @@
 from db.models.status_sets import StatusSets
-from sqlalchemy.orm import Session
 from .utils.service import BaseService
 
 

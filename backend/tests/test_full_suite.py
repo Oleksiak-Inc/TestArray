@@ -2281,7 +2281,7 @@ class TestUsersAPI:
         """Create an admin user, log in, and return a client with admin cookies."""
         from db.models.user_types import UserTypes
         from db.models.users import Users
-        from app.api.utils.auth import hash_password
+        from core.security import PasswordHasher
 
         admin_type = db_session.query(UserTypes).filter(UserTypes.name == "admin").first()
         email = f"admin-{uuid4().hex}@example.com"
@@ -2289,7 +2289,7 @@ class TestUsersAPI:
             first_name="Admin",
             last_name="User",
             email=email,
-            password=hash_password("admin-password"),
+            password=PasswordHasher().hash("admin-password"),
             user_type_id=admin_type.id,
         )
         db_session.add(admin_user)

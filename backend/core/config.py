@@ -41,6 +41,8 @@ class Settings(BaseSettings):
 
     FRONTEND_ORIGINS: str
 
+    SECURE_COOKIES: bool = False
+
     UPLOAD_DIR: str
     CHUNK_SIZE: int
     MAX_FILE_SIZE: int
@@ -56,5 +58,8 @@ class Settings(BaseSettings):
         ".json",
         ".xml",
     }
+
+    SUPERUSER_LOGIN: str
+    SUPERUSER_PASSWORD: str
 
 settings = Settings()

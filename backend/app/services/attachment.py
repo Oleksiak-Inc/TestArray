@@ -80,20 +80,31 @@ class AttachmentService(BaseService):
         attachment = self.db.query(Attachments).filter(Attachments.id == attachment_id).first()
         if not attachment:
             return None
-
-        # Delete the old file
-        old_file_path = Path(settings.UPLOAD_DIR) / attachment.relative_path
-        if old_file_path.exists():
-            old_file_path.unlink()
-
-        # Save the new file
-        new_attachment = await self.save_file(new_file, attachment.uploaded_by)
-        if not new_attachment:
+        # delete old file from disk
+        old_path = Path(settings.UPLOAD_DIR) / attachment.relative_path
+        if old_path.exists():
+            old_path.unlink()
+        # save new file to disk (reuse save_file logic but without DB insert)
+        ext = Path(new_file.filename).suffix
+        if ext not in settings.ALLOWED_FILE_EXTENSIONS:
             return None
-
-        # Update the database record
-        attachment.filename = new_attachment.filename
-        attachment.relative_path = new_attachment.relative_path
+        date_dir = get_date_subdir()
+        full_dir = Path(settings.UPLOAD_DIR) / date_dir
+        full_dir.mkdir(parents=True, exist_ok=True)
+        stored_name = f"{uuid4()}{ext}"
+        dest = full_dir / stored_name
+        total_bytes = 0
+        async with aiofiles.open(dest, "wb") as f:
+            while chunk := await new_file.read(settings.CHUNK_SIZE):
+                total_bytes += len(chunk)
+                if total_bytes > settings.MAX_FILE_SIZE:
+                    await f.close()
+                    dest.unlink(missing_ok=True)
+                    return None
+                await f.write(chunk)
+        # update the existing DB record
+        attachment.filename = new_file.filename
+        attachment.relative_path = str(date_dir / stored_name)
         attachment.edited_by = edited_by
         attachment.edited_at = datetime.now()
         return self.commit_and_refresh(attachment)

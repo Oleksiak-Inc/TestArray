@@ -6,7 +6,7 @@ class UserTypes(Base):
     __tablename__ = "user_types"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)
+    name = Column(String(100), unique=True, nullable=False)
     description = Column(Text)
 
     # ---- relationships ----

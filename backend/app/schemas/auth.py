@@ -1,5 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
 
+from app.schemas.common import BaseSchema
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
@@ -17,6 +19,6 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
-class TokenPayload(BaseModel):
-    sub: int   # user id
+class TokenPayload(BaseSchema):
+    sub: int
     exp: int
