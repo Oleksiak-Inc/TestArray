@@ -12,6 +12,7 @@ class TestCases(Base):
     status_set = relationship("StatusSets", back_populates="test_cases", foreign_keys=[status_set_id])
     versions = relationship("TestCaseVersions", back_populates="test_case", foreign_keys="TestCaseVersions.test_case_id")
     suitcases = relationship("Suitcases", back_populates="test_case", foreign_keys="Suitcases.test_case_id")
+    restrictions = relationship("TestCaseRestrictions", back_populates="test_case", foreign_keys="TestCaseRestrictions.test_case_id")
 
     __table_args__ = (
         Index("test_case_scenario_idx", "scenario_id"),

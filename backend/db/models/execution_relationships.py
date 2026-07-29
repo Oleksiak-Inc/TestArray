@@ -13,7 +13,11 @@ class ExecutionRelationships(Base):
 
     execution = relationship("Executions", foreign_keys=[execution_id], back_populates="source_relationships")
     related_execution = relationship("Executions", foreign_keys=[related_execution_id], back_populates="target_relationships")
-    relation_type = relationship("RelationTypes", foreign_keys=[relation_type_id])
+    relation_type = relationship(
+    "RelationTypes",
+    foreign_keys=[relation_type_id],
+    back_populates="execution_relationships",
+)
 
     __table_args__ = (
         UniqueConstraint("execution_id", "related_execution_id", name="unique_execution_rel"),

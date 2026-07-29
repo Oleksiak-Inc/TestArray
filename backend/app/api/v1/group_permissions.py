@@ -1,10 +1,14 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.schemas.group_permission import GroupPermissionCreate, GroupPermissionOut
+from app.schemas.group_permission import (
+    GroupMultiplePermissionsCreate,
+    GroupPermissionCreate,
+    GroupPermissionOut,
+)
 from app.schemas.permission import PermissionOut
 from db.models.users import Users
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 from db.session import get_db
 from app.services.group_permission import GroupPermissionService
 
@@ -22,6 +26,19 @@ def assign_permission(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return gp
+
+
+@router.post("/multiple", response_model=List[GroupPermissionOut], status_code=status.HTTP_201_CREATED)
+def assign_multiple_permissions(
+    gp_in: GroupMultiplePermissionsCreate,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(permission_required("group_permissions.write")),
+):
+    service = GroupPermissionService(db)
+    try:
+        return service.assign_multiple_permissions(gp_in.group_id, gp_in.permission_ids)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/{group_id}/{permission_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_permission(

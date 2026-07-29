@@ -1,9 +1,9 @@
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from db.session import get_db
 from db.models.users import Users
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 from app.services.run import RunService
 from app.schemas.run import *
 
@@ -67,7 +67,7 @@ def update_run(
 def delete_run(
     run_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("runs.write")),
 ):
     run = RunService(db).delete_run(run_id)
     if not run:

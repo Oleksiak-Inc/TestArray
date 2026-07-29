@@ -5,7 +5,6 @@ from .utils.service import BaseService
 
 class GroupMembershipService(BaseService):
     def add_member(self, group_id: int, user_id: int) -> GroupsMembers:
-        # optional: check group/user exist
         group = self.db.query(UserGroups).filter(UserGroups.id == group_id).first()
         
         if not group:

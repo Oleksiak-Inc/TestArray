@@ -32,6 +32,7 @@ class SuitcaseService(BaseService):
                 continue
             suitcase = self.add_and_flush(Suitcases(test_case_id=tc_id, test_suite_id=test_suite_id))
             created.append(suitcase)
+            existing_ids.add(tc_id)
  
         self.commit()
         for s in created:

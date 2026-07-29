@@ -1,11 +1,6 @@
-#join table between user groups and permissions
-
 from sqlalchemy import Column, ForeignKey, Index, Integer
-
 from db.base import Base
-
 from sqlalchemy.orm import relationship
-
 
 class GroupPermissions(Base):
     __tablename__ = "group_permissions"

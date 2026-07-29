@@ -8,10 +8,16 @@ class Permissions(Base):
     id = Column(Integer, primary_key=True)
     code = Column(String(100), unique=True, nullable=False)
     description = Column(String(255), nullable=False)
+    scope = Column(String(10), nullable=False)
 
     # relationships
     group_permissions = relationship(
         "GroupPermissions",
+        back_populates="permission",
+        cascade="all, delete-orphan",
+    )
+    project_role_permissions = relationship(
+        "ProjectRolePermissions",
         back_populates="permission",
         cascade="all, delete-orphan",
     )

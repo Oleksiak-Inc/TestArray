@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.device import *
 from db.models.users import Users
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 from db.session import get_db
 from app.services.device import DeviceService
 
@@ -64,7 +64,7 @@ def update_device(
 def delete_device(
     device_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("devices.write")),
 ):
     device = DeviceService(db).delete_device(device_id)
     if not device:

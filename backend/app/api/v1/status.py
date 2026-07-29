@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.status import *
 from db.models.users import Users
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 from db.session import get_db
 from app.services.status import StatusService
 
@@ -67,7 +67,7 @@ def update_status(
 def delete_status(
     status_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("statuses.write")),
 ):
     status_obj = StatusService(db).delete_status(status_id)
     if not status_obj:

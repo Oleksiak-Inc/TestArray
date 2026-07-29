@@ -1,15 +1,12 @@
-from typing import List
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from db.session import get_db
 
 from app.schemas.client import *
 from app.schemas.project import *
-from db.models.clients import Clients
-from db.models.projects import Projects
 from db.models.users import Users
 from app.api.utils.http_errors import HttpError
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 
 from app.services.project import ProjectService
 
@@ -68,7 +65,7 @@ def update_project(
 def delete_project(
     project_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("projects.write")),
 ):
     project = ProjectService(db).delete_project(project_id)
     if not project:

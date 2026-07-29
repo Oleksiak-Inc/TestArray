@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.execution_relationship import ExecutionRelationshipCreate, ExecutionRelationshipOut
 from db.session import get_db
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 from db.models.users import Users
 from app.services.execution_relationship import ExecutionRelationshipService
 
@@ -35,7 +35,7 @@ def list_relationships(
 def delete_relationship(
     relationship_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("execution_relationships.write")),
 ):
     service = ExecutionRelationshipService(db)
     success = service.delete_relationship(relationship_id)

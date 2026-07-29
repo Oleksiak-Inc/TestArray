@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Index, Integer, String, Text
+from sqlalchemy import Column, Integer, String, Text
 from db.base import Base
 from sqlalchemy.orm import relationship
 
@@ -9,9 +9,4 @@ class UserTypes(Base):
     name = Column(String(100), unique=True, nullable=False)
     description = Column(Text)
 
-    # ---- relationships ----
-    users = relationship(
-        "Users",
-        foreign_keys="Users.user_type_id",
-        back_populates="user_type"
-    )
+    # legacy model kept for migration compatibility; no active relationships

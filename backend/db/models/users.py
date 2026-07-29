@@ -8,24 +8,22 @@ class Users(Base):
     id = Column(Integer, primary_key=True)
     # use_alter ensures the FK is added after both tables exist, avoiding circular migration issues
     #user_group_id = Column(Integer, ForeignKey("user_groups.id", use_alter=True), nullable=True)
-    user_type_id = Column(Integer, ForeignKey("user_types.id"), nullable=False)
     first_name = Column(String(255), nullable=False)
     last_name = Column(String(255), nullable=False)
     email = Column(String(255), nullable=False, unique=True)
-    password = Column(String(255), nullable=False)
+    password = Column(String(255), nullable=True)
 
-    active = Column(Boolean, default=True)
+    active = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True))
 
-    # ---- relationships ----
-    user_type = relationship(
-        "UserTypes", 
-        foreign_keys=[user_type_id], 
-        back_populates="users")
-
     groups_member = relationship(
         "GroupsMembers",
+        back_populates="user"
+    )
+
+    projects_member = relationship(
+        "ProjectMembers",
         back_populates="user"
     )
 
@@ -76,6 +74,24 @@ class Users(Base):
         "Sessions",
         foreign_keys="Sessions.user_id", 
         back_populates="user")
+
+    triggered_incidents = relationship(
+        "Incidents",
+        foreign_keys="Incidents.triggered_by_user_id",
+        back_populates="triggered_by_user",
+    )
+
+    targeted_incidents = relationship(
+        "Incidents",
+        foreign_keys="Incidents.target_user_id",
+        back_populates="target_user",
+    )
+
+    revocations = relationship(
+        "Revocations",
+        foreign_keys="Revocations.revoked_by_user_id",
+        back_populates="revoked_by_user",
+    )
     
     projects = relationship(
         "Projects",
@@ -84,6 +100,5 @@ class Users(Base):
     )
 
     __table_args__ = (
-        Index("user_user_type_idx", "user_type_id"),
         #Index("user_user_group_idx", "user_group_id"),
     )

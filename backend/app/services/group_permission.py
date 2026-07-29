@@ -22,6 +22,46 @@ class GroupPermissionService(BaseService):
         gp = GroupPermissions(group_id=group_id, permission_id=permission_id)
         return self.save(gp)
 
+    def assign_multiple_permissions(
+        self, group_id: int, permission_ids: list[int]
+    ) -> list[GroupPermissions]:
+        """Assign all requested permissions to a group in one transaction."""
+        group = self.db.query(UserGroups).filter(UserGroups.id == group_id).first()
+        if not group:
+            raise ValueError("Group does not exist")
+
+        if len(permission_ids) != len(set(permission_ids)):
+            raise ValueError("Permission IDs must be unique")
+
+        permissions = (
+            self.db.query(Permissions)
+            .filter(Permissions.id.in_(permission_ids))
+            .all()
+        )
+        found_permission_ids = {permission.id for permission in permissions}
+        if len(found_permission_ids) != len(permission_ids):
+            raise ValueError("Permission does not exist")
+
+        assigned_permission_ids = {
+            permission_id
+            for (permission_id,) in self.db.query(GroupPermissions.permission_id)
+            .filter(
+                GroupPermissions.group_id == group_id,
+                GroupPermissions.permission_id.in_(permission_ids),
+            )
+            .all()
+        }
+        if assigned_permission_ids:
+            raise ValueError("Permission already assigned to group")
+
+        assignments = [
+            GroupPermissions(group_id=group_id, permission_id=permission_id)
+            for permission_id in permission_ids
+        ]
+        self.db.add_all(assignments)
+        self.db.commit()
+        return assignments
+
     def remove_permission(self, group_id: int, permission_id: int) -> bool:
         gp = self.db.query(GroupPermissions).filter(
             GroupPermissions.group_id == group_id,

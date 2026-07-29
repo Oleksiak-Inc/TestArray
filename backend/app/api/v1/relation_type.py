@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.schemas.relation_type import RelationTypeCreate, RelationTypeOut
 from db.models.users import Users
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 from db.session import get_db
 from app.services.relation_type import RelationTypeService
 
@@ -58,7 +58,7 @@ def update_relation_type(
 def delete_relation_type(
     type_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("relation_types.write")),
 ):
     service = RelationTypeService(db)
     rel_type = service.delete_relation_type(type_id)

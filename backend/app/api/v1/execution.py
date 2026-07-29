@@ -3,7 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 
 from app.schemas.execution import (
     ExecutionCreate,
@@ -88,7 +88,7 @@ def update_execution(
 def delete_execution(
     execution_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("executions.write")),
 ):
     execution = ExecutionService(db).delete_execution(execution_id)
     if not execution:

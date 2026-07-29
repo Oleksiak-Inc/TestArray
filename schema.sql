@@ -145,6 +145,42 @@ ALTER SEQUENCE public.devices_id_seq OWNED BY public.devices.id;
 
 
 --
+-- Name: execution_relationships; Type: TABLE; Schema: public; Owner: admin
+--
+
+CREATE TABLE public.execution_relationships (
+    id integer NOT NULL,
+    execution_id integer NOT NULL,
+    related_execution_id integer NOT NULL,
+    relation_type_id integer NOT NULL
+);
+
+
+ALTER TABLE public.execution_relationships OWNER TO admin;
+
+--
+-- Name: execution_relationships_id_seq; Type: SEQUENCE; Schema: public; Owner: admin
+--
+
+CREATE SEQUENCE public.execution_relationships_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.execution_relationships_id_seq OWNER TO admin;
+
+--
+-- Name: execution_relationships_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: admin
+--
+
+ALTER SEQUENCE public.execution_relationships_id_seq OWNED BY public.execution_relationships.id;
+
+
+--
 -- Name: executions; Type: TABLE; Schema: public; Owner: admin
 --
 
@@ -159,7 +195,11 @@ CREATE TABLE public.executions (
     resolution_id integer,
     actual_result text,
     executed_at timestamp with time zone,
-    execution_order integer NOT NULL
+    execution_order integer NOT NULL,
+    updated_by integer,
+    updated_at timestamp with time zone,
+    assigned_to integer,
+    started_at timestamp with time zone
 );
 
 
@@ -188,13 +228,73 @@ ALTER SEQUENCE public.executions_id_seq OWNED BY public.executions.id;
 
 
 --
+-- Name: group_permissions; Type: TABLE; Schema: public; Owner: admin
+--
+
+CREATE TABLE public.group_permissions (
+    group_id integer NOT NULL,
+    permission_id integer NOT NULL
+);
+
+
+ALTER TABLE public.group_permissions OWNER TO admin;
+
+--
+-- Name: groups_members; Type: TABLE; Schema: public; Owner: admin
+--
+
+CREATE TABLE public.groups_members (
+    group_id integer NOT NULL,
+    user_id integer NOT NULL
+);
+
+
+ALTER TABLE public.groups_members OWNER TO admin;
+
+--
+-- Name: permissions; Type: TABLE; Schema: public; Owner: admin
+--
+
+CREATE TABLE public.permissions (
+    id integer NOT NULL,
+    code character varying(100) NOT NULL,
+    description character varying(255) NOT NULL
+);
+
+
+ALTER TABLE public.permissions OWNER TO admin;
+
+--
+-- Name: permissions_id_seq; Type: SEQUENCE; Schema: public; Owner: admin
+--
+
+CREATE SEQUENCE public.permissions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.permissions_id_seq OWNER TO admin;
+
+--
+-- Name: permissions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: admin
+--
+
+ALTER SEQUENCE public.permissions_id_seq OWNED BY public.permissions.id;
+
+
+--
 -- Name: projects; Type: TABLE; Schema: public; Owner: admin
 --
 
 CREATE TABLE public.projects (
     id integer NOT NULL,
-    name character varying,
-    client_id integer NOT NULL
+    name character varying NOT NULL,
+    client_id integer NOT NULL,
+    owner_id integer NOT NULL
 );
 
 
@@ -220,6 +320,40 @@ ALTER SEQUENCE public.projects_id_seq OWNER TO admin;
 --
 
 ALTER SEQUENCE public.projects_id_seq OWNED BY public.projects.id;
+
+
+--
+-- Name: relation_types; Type: TABLE; Schema: public; Owner: admin
+--
+
+CREATE TABLE public.relation_types (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL
+);
+
+
+ALTER TABLE public.relation_types OWNER TO admin;
+
+--
+-- Name: relation_types_id_seq; Type: SEQUENCE; Schema: public; Owner: admin
+--
+
+CREATE SEQUENCE public.relation_types_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.relation_types_id_seq OWNER TO admin;
+
+--
+-- Name: relation_types_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: admin
+--
+
+ALTER SEQUENCE public.relation_types_id_seq OWNED BY public.relation_types.id;
 
 
 --
@@ -263,7 +397,7 @@ ALTER SEQUENCE public.resolutions_id_seq OWNED BY public.resolutions.id;
 
 CREATE TABLE public.runs (
     id integer NOT NULL,
-    name character varying,
+    name character varying NOT NULL,
     started_at timestamp with time zone,
     done_at timestamp with time zone,
     test_suite_metadata text,
@@ -301,7 +435,7 @@ ALTER SEQUENCE public.runs_id_seq OWNED BY public.runs.id;
 
 CREATE TABLE public.scenarios (
     id integer NOT NULL,
-    name character varying
+    name character varying NOT NULL
 );
 
 
@@ -372,7 +506,7 @@ ALTER SEQUENCE public.sessions_id_seq OWNED BY public.sessions.id;
 
 CREATE TABLE public.status_sets (
     id integer NOT NULL,
-    name character varying
+    name character varying NOT NULL
 );
 
 
@@ -554,7 +688,7 @@ ALTER SEQUENCE public.test_cases_id_seq OWNED BY public.test_cases.id;
 
 CREATE TABLE public.test_suites (
     id integer NOT NULL,
-    name character varying
+    name character varying NOT NULL
 );
 
 
@@ -590,7 +724,7 @@ CREATE TABLE public.user_groups (
     id integer NOT NULL,
     created_by_id integer NOT NULL,
     owner_id integer NOT NULL,
-    name character varying
+    name character varying NOT NULL
 );
 
 
@@ -659,7 +793,6 @@ ALTER SEQUENCE public.user_types_id_seq OWNED BY public.user_types.id;
 
 CREATE TABLE public.users (
     id integer NOT NULL,
-    user_group_id integer,
     user_type_id integer NOT NULL,
     first_name character varying NOT NULL,
     last_name character varying NOT NULL,
@@ -717,6 +850,13 @@ ALTER TABLE ONLY public.devices ALTER COLUMN id SET DEFAULT nextval('public.devi
 
 
 --
+-- Name: execution_relationships id; Type: DEFAULT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.execution_relationships ALTER COLUMN id SET DEFAULT nextval('public.execution_relationships_id_seq'::regclass);
+
+
+--
 -- Name: executions id; Type: DEFAULT; Schema: public; Owner: admin
 --
 
@@ -724,10 +864,24 @@ ALTER TABLE ONLY public.executions ALTER COLUMN id SET DEFAULT nextval('public.e
 
 
 --
+-- Name: permissions id; Type: DEFAULT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.permissions ALTER COLUMN id SET DEFAULT nextval('public.permissions_id_seq'::regclass);
+
+
+--
 -- Name: projects id; Type: DEFAULT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.projects ALTER COLUMN id SET DEFAULT nextval('public.projects_id_seq'::regclass);
+
+
+--
+-- Name: relation_types id; Type: DEFAULT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.relation_types ALTER COLUMN id SET DEFAULT nextval('public.relation_types_id_seq'::regclass);
 
 
 --
@@ -862,6 +1016,14 @@ ALTER TABLE ONLY public.devices
 
 
 --
+-- Name: execution_relationships execution_relationships_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.execution_relationships
+    ADD CONSTRAINT execution_relationships_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: executions executions_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -870,11 +1032,51 @@ ALTER TABLE ONLY public.executions
 
 
 --
+-- Name: group_permissions group_permissions_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.group_permissions
+    ADD CONSTRAINT group_permissions_pkey PRIMARY KEY (group_id, permission_id);
+
+
+--
+-- Name: groups_members groups_members_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.groups_members
+    ADD CONSTRAINT groups_members_pkey PRIMARY KEY (group_id, user_id);
+
+
+--
+-- Name: permissions permissions_code_key; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.permissions
+    ADD CONSTRAINT permissions_code_key UNIQUE (code);
+
+
+--
+-- Name: permissions permissions_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.permissions
+    ADD CONSTRAINT permissions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: projects projects_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.projects
     ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: relation_types relation_types_pkey; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.relation_types
+    ADD CONSTRAINT relation_types_pkey PRIMARY KEY (id);
 
 
 --
@@ -1014,6 +1216,14 @@ ALTER TABLE ONLY public.test_suites
 
 
 --
+-- Name: execution_relationships unique_execution_rel; Type: CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.execution_relationships
+    ADD CONSTRAINT unique_execution_rel UNIQUE (execution_id, related_execution_id);
+
+
+--
 -- Name: user_groups user_groups_name_key; Type: CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1111,6 +1321,13 @@ CREATE INDEX device_project_idx ON public.devices USING btree (project_id);
 
 
 --
+-- Name: execution_assignee_idx; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX execution_assignee_idx ON public.executions USING btree (assigned_to);
+
+
+--
 -- Name: execution_attachment_idx; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -1132,6 +1349,27 @@ CREATE INDEX execution_executor_idx ON public.executions USING btree (executed_b
 
 
 --
+-- Name: execution_relationship_execution_idx; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX execution_relationship_execution_idx ON public.execution_relationships USING btree (execution_id);
+
+
+--
+-- Name: execution_relationship_related_execution_idx; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX execution_relationship_related_execution_idx ON public.execution_relationships USING btree (related_execution_id);
+
+
+--
+-- Name: execution_relationship_relation_type_idx; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX execution_relationship_relation_type_idx ON public.execution_relationships USING btree (relation_type_id);
+
+
+--
 -- Name: execution_run_idx; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -1150,6 +1388,41 @@ CREATE INDEX execution_status_idx ON public.executions USING btree (status_id);
 --
 
 CREATE INDEX execution_test_case_version_idx ON public.executions USING btree (test_case_version_id);
+
+
+--
+-- Name: execution_updater_idx; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX execution_updater_idx ON public.executions USING btree (updated_by);
+
+
+--
+-- Name: group_member_group_idx; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX group_member_group_idx ON public.groups_members USING btree (group_id);
+
+
+--
+-- Name: group_member_user_idx; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX group_member_user_idx ON public.groups_members USING btree (user_id);
+
+
+--
+-- Name: group_permissions_group_idx; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX group_permissions_group_idx ON public.group_permissions USING btree (group_id);
+
+
+--
+-- Name: group_permissions_permission_idx; Type: INDEX; Schema: public; Owner: admin
+--
+
+CREATE INDEX group_permissions_permission_idx ON public.group_permissions USING btree (permission_id);
 
 
 --
@@ -1265,13 +1538,6 @@ CREATE INDEX user_group_owner_idx ON public.user_groups USING btree (owner_id);
 
 
 --
--- Name: user_user_group_idx; Type: INDEX; Schema: public; Owner: admin
---
-
-CREATE INDEX user_user_group_idx ON public.users USING btree (user_group_id);
-
-
---
 -- Name: user_user_type_idx; Type: INDEX; Schema: public; Owner: admin
 --
 
@@ -1308,6 +1574,38 @@ ALTER TABLE ONLY public.attachments
 
 ALTER TABLE ONLY public.devices
     ADD CONSTRAINT devices_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id);
+
+
+--
+-- Name: execution_relationships execution_relationships_execution_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.execution_relationships
+    ADD CONSTRAINT execution_relationships_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES public.executions(id);
+
+
+--
+-- Name: execution_relationships execution_relationships_related_execution_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.execution_relationships
+    ADD CONSTRAINT execution_relationships_related_execution_id_fkey FOREIGN KEY (related_execution_id) REFERENCES public.executions(id);
+
+
+--
+-- Name: execution_relationships execution_relationships_relation_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.execution_relationships
+    ADD CONSTRAINT execution_relationships_relation_type_id_fkey FOREIGN KEY (relation_type_id) REFERENCES public.relation_types(id);
+
+
+--
+-- Name: executions executions_assigned_to_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.executions
+    ADD CONSTRAINT executions_assigned_to_fkey FOREIGN KEY (assigned_to) REFERENCES public.users(id);
 
 
 --
@@ -1367,11 +1665,59 @@ ALTER TABLE ONLY public.executions
 
 
 --
+-- Name: executions executions_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.executions
+    ADD CONSTRAINT executions_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id);
+
+
+--
+-- Name: group_permissions group_permissions_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.group_permissions
+    ADD CONSTRAINT group_permissions_group_id_fkey FOREIGN KEY (group_id) REFERENCES public.user_groups(id);
+
+
+--
+-- Name: group_permissions group_permissions_permission_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.group_permissions
+    ADD CONSTRAINT group_permissions_permission_id_fkey FOREIGN KEY (permission_id) REFERENCES public.permissions(id);
+
+
+--
+-- Name: groups_members groups_members_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.groups_members
+    ADD CONSTRAINT groups_members_group_id_fkey FOREIGN KEY (group_id) REFERENCES public.user_groups(id);
+
+
+--
+-- Name: groups_members groups_members_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.groups_members
+    ADD CONSTRAINT groups_members_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id);
+
+
+--
 -- Name: projects projects_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
 ALTER TABLE ONLY public.projects
     ADD CONSTRAINT projects_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.clients(id);
+
+
+--
+-- Name: projects projects_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.projects
+    ADD CONSTRAINT projects_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id);
 
 
 --
@@ -1447,6 +1793,22 @@ ALTER TABLE ONLY public.test_cases
 
 
 --
+-- Name: user_groups user_groups_created_by_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.user_groups
+    ADD CONSTRAINT user_groups_created_by_id_fkey FOREIGN KEY (created_by_id) REFERENCES public.users(id);
+
+
+--
+-- Name: user_groups user_groups_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
+--
+
+ALTER TABLE ONLY public.user_groups
+    ADD CONSTRAINT user_groups_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id);
+
+
+--
 -- Name: users users_user_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: admin
 --
 
@@ -1457,5 +1819,4 @@ ALTER TABLE ONLY public.users
 --
 -- PostgreSQL database dump complete
 --
-
 

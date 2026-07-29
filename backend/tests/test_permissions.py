@@ -1,14 +1,16 @@
 from uuid import uuid4
 
+import pytest
+
 from core.permissions import PERMISSIONS
 from core.startup import init_db
 from db.models.group_permissions import GroupPermissions
 from db.models.groups_members import GroupsMembers
 from db.models.permissions import Permissions
 from db.models.user_groups import UserGroups
-from db.models.user_types import UserTypes
 from db.models.users import Users
-from app.api.utils.auth_dependencies import PermissionChecker
+from app.api.utils.auth_dependencies import GlobalPermissionChecker
+from app.services.group_permission import GroupPermissionService
 
 
 def test_init_db_seeds_permissions_table(db_session):
@@ -19,7 +21,7 @@ def test_init_db_seeds_permissions_table(db_session):
         for permission in db_session.query(Permissions).all()
     }
 
-    expected_codes = {code for code, _ in PERMISSIONS}
+    expected_codes = {code for code, _, _ in PERMISSIONS}
 
     assert expected_codes.issubset(seeded_codes)
     assert len(seeded_codes) >= len(expected_codes)
@@ -97,35 +99,9 @@ def test_regular_user_without_permission_is_forbidden_on_protected_endpoint(clie
 
 
 def test_user_has_permission_respects_groups_and_admin_override(db_session):
-    regular_type = db_session.query(UserTypes).filter(UserTypes.name == "regular").first()
-    admin_type = db_session.query(UserTypes).filter(UserTypes.name == "admin").first()
-
-    if not regular_type:
-        regular_type = UserTypes(name="regular", description="Regular user")
-        db_session.add(regular_type)
-        db_session.commit()
-        db_session.refresh(regular_type)
-
-    if not admin_type:
-        admin_type = UserTypes(name="admin", description="Admin user")
-        db_session.add(admin_type)
-        db_session.commit()
-        db_session.refresh(admin_type)
-
-    regular_user = Users(
-        first_name="Regular",
-        last_name="User",
-        email="regular-perms@example.com",
-        password="secret",
-        user_type_id=regular_type.id,
-    )
-    admin_user = Users(
-        first_name="Admin",
-        last_name="User",
-        email="admin-perms@example.com",
-        password="secret",
-        user_type_id=admin_type.id,
-    )
+    # Create two users: regular and admin. Admin will be added to a superadmin group.
+    regular_user = Users(first_name="Regular", last_name="User", email=f"regular-{uuid4().hex}@example.com", password="secret")
+    admin_user = Users(first_name="Admin", last_name="User", email=f"admin-{uuid4().hex}@example.com", password="secret")
     db_session.add_all([regular_user, admin_user])
     db_session.commit()
     db_session.refresh(regular_user)
@@ -134,7 +110,8 @@ def test_user_has_permission_respects_groups_and_admin_override(db_session):
     permission = db_session.query(Permissions).filter(Permissions.code == "clients.read").first()
     assert permission is not None
 
-    group = UserGroups(name="Test Group", created_by_id=regular_user.id, owner_id=regular_user.id)
+    # Create a test group for the regular user and grant the permission
+    group = UserGroups(name=f"Test Group {uuid4().hex}", created_by_id=regular_user.id, owner_id=regular_user.id)
     db_session.add(group)
     db_session.commit()
     db_session.refresh(group)
@@ -142,10 +119,89 @@ def test_user_has_permission_respects_groups_and_admin_override(db_session):
     db_session.add(GroupsMembers(group_id=group.id, user_id=regular_user.id))
     db_session.commit()
 
-    assert PermissionChecker(db_session).has_permission(regular_user, "clients.read") is False
+    assert GlobalPermissionChecker(db_session).has_permission(regular_user, "clients.read") is False
 
     db_session.add(GroupPermissions(group_id=group.id, permission_id=permission.id))
     db_session.commit()
 
-    assert PermissionChecker(db_session).has_permission(regular_user, "clients.read") is True
-    assert PermissionChecker(db_session).has_permission(admin_user, "clients.read") is True
+    assert GlobalPermissionChecker(db_session).has_permission(regular_user, "clients.read") is True
+
+    # Now create a superadmin group, give it all global perms, and add admin_user
+    super_group = db_session.query(UserGroups).filter(UserGroups.name == "superadmin").first()
+    if not super_group:
+        super_group = UserGroups(name="superadmin", created_by_id=admin_user.id, owner_id=admin_user.id)
+        db_session.add(super_group)
+        db_session.commit()
+        db_session.refresh(super_group)
+
+    all_global_perms = db_session.query(Permissions).filter(Permissions.scope == "global").all()
+    existing_gp_ids = {gp.permission_id for gp in super_group.group_permissions}
+    for perm in all_global_perms:
+        if perm.id not in existing_gp_ids:
+            db_session.add(GroupPermissions(group_id=super_group.id, permission_id=perm.id))
+    db_session.commit()
+
+    db_session.add(GroupsMembers(group_id=super_group.id, user_id=admin_user.id))
+    db_session.commit()
+
+    assert GlobalPermissionChecker(db_session).has_permission(admin_user, "clients.read") is True
+
+
+def test_assign_multiple_permissions_assigns_all_requested_permissions(db_session):
+    user = Users(
+        first_name="Bulk",
+        last_name="Permissions",
+        email=f"bulk-permissions-{uuid4().hex}@example.com",
+        password="secret",
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    group = UserGroups(name=f"Bulk group {uuid4().hex}", created_by_id=user.id, owner_id=user.id)
+    permissions = [
+        Permissions(code=f"bulk.permission.{uuid4().hex}", description="Test permission", scope="global")
+        for _ in range(2)
+    ]
+    db_session.add_all([group, *permissions])
+    db_session.commit()
+
+    assignments = GroupPermissionService(db_session).assign_multiple_permissions(
+        group.id, [permission.id for permission in permissions]
+    )
+
+    assert [assignment.permission_id for assignment in assignments] == [
+        permission.id for permission in permissions
+    ]
+    assert db_session.query(GroupPermissions).filter(
+        GroupPermissions.group_id == group.id
+    ).count() == 2
+
+
+def test_assign_multiple_permissions_is_atomic_when_assignment_exists(db_session):
+    user = Users(
+        first_name="Atomic",
+        last_name="Permissions",
+        email=f"atomic-permissions-{uuid4().hex}@example.com",
+        password="secret",
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    group = UserGroups(name=f"Atomic group {uuid4().hex}", created_by_id=user.id, owner_id=user.id)
+    permissions = [
+        Permissions(code=f"atomic.permission.{uuid4().hex}", description="Test permission", scope="global")
+        for _ in range(2)
+    ]
+    db_session.add_all([group, *permissions])
+    db_session.commit()
+    db_session.add(GroupPermissions(group_id=group.id, permission_id=permissions[0].id))
+    db_session.commit()
+
+    with pytest.raises(ValueError, match="already assigned"):
+        GroupPermissionService(db_session).assign_multiple_permissions(
+            group.id, [permission.id for permission in permissions]
+        )
+
+    assert db_session.query(GroupPermissions).filter(
+        GroupPermissions.group_id == group.id
+    ).count() == 1

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.services.attachment import AttachmentService
 from app.schemas.attachment import AttachmentOut, AttachmentUpdate
 from db.session import get_db
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 from db.models.users import Users
 
 
@@ -71,7 +71,7 @@ async def update_attachment(
 async def delete_file_by_id(
     attachment_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("attachments.write")),
 ):
     service = AttachmentService(db)
     attachment = await service.delete_file(attachment_id)

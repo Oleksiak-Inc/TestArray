@@ -4,7 +4,7 @@ from app.schemas.group_membership import GroupMembershipCreate, GroupMembershipO
 from app.schemas.users import UserOut
 from app.schemas.user_group import UserGroupOut
 from db.session import get_db
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 from db.models.users import Users
 from app.services.group_membership import GroupMembershipService
 
@@ -28,7 +28,7 @@ def remove_member(
     group_id: int,
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("group_memberships.write")),
 ):
     service = GroupMembershipService(db)
     try:

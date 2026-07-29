@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas.user_group import *
 from db.models.users import Users
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import permission_required
 from db.session import get_db
 from app.services.user_group import UserGroupService
 
@@ -69,7 +69,7 @@ def update_user_group(
 def delete_user_group(
     group_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("user_groups.write")),
 ):
     group = UserGroupService(db).delete_user_group(group_id)
     if not group:

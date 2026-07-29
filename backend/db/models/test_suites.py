@@ -13,3 +13,8 @@ class TestSuites(Base):
         back_populates="test_suite",
         foreign_keys="Suitcases.test_suite_id"
     )
+    
+    restrictions = relationship(
+        "TestSuiteRestrictions", 
+        back_populates="test_suite", 
+        foreign_keys="TestSuiteRestrictions.test_suite_id")

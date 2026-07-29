@@ -9,7 +9,6 @@ from db.models.runs import Runs
 from db.models.statuses import Statuses
 from db.models.suitcases import Suitcases
 from db.models.test_suites import TestSuites
-from db.models.user_types import UserTypes
 from db.models.users import Users
 from app.services.test_case_version import TestCaseVersionService
 from .utils.service import BaseService
@@ -179,10 +178,8 @@ class ExecutionService(BaseService):
         execution = self.get_execution(execution_id)
         if not execution:
             return None
-        admin_type = self.db.query(UserTypes).filter(UserTypes.name == 'admin').first()
-        is_admin = admin_type is not None and current_user.user_type_id == admin_type.id
-        if not is_admin and execution.assigned_to != current_user.id:
-            raise ValueError('Only the assigned user or an admin can start this execution')
+        if execution.assigned_to != current_user.id:
+            raise ValueError('Only the assigned user can start this execution')
         if execution.started_at is not None:
             raise ValueError('Execution has already been started')
         execution.started_at = datetime.now(timezone.utc)

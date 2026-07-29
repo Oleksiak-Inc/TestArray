@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.schemas.user_type import *
 from db.models.users import Users
 from app.api.utils.http_errors import HttpError
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import get_current_user
 from db.session import get_db
 from app.services.user_type import UserTypeService
 

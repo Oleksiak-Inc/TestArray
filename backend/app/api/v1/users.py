@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.schemas.users import *
 from db.models.users import Users
 from app.api.utils.http_errors import HttpError
-from app.api.utils.auth_dependencies import get_current_user, get_current_admin_user, permission_required
+from app.api.utils.auth_dependencies import get_current_user, permission_required
 from db.session import get_db
 from app.services.users import UserService
 
@@ -69,7 +69,7 @@ def admin_update_user(
     user_id: int,
     user_in: UserUpdateAdmin,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("users.write")),
 ):
     """Admin updates user fields (group, type, active)."""
     user = UserService(db).update_user(user_id, user_in.model_dump(exclude_unset=True))
@@ -82,7 +82,7 @@ def admin_update_user(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: Users = Depends(get_current_admin_user),
+    current_user: Users = Depends(permission_required("users.write")),
 ):
     """Delete a user record."""
     user = UserService(db).delete_user(user_id)

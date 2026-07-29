@@ -1,19 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, Dict, Any
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
 from datetime import datetime
-
-'''
-class AttachmentBase(BaseModel):
-    resolution_id: Optional[int] = None
-    settings: Optional[Dict[str, Any]] = None
-'''
-
-'''
-class AttachmentUploadForm(BaseModel):
-    resolution_id: Optional[int] = Field(None, form=True)
-    settings: Optional[str] = Field(None, form=True)
-    presentmon_version: Optional[str] = Field(None, form=True)
-'''
 
 class AttachmentUpdate(BaseModel):
     filename: Optional[str] = None

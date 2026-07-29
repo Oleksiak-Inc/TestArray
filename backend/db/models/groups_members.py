@@ -1,5 +1,3 @@
-#join table between user groups and users
-
 from sqlalchemy import Column, ForeignKey, Index, Integer
 
 from db.base import Base

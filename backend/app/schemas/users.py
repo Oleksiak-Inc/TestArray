@@ -29,6 +29,6 @@ class UserOut(BaseSchema):
     first_name: str
     last_name: str
     active: bool
-    user_type_id: int
+    user_type_id: int | None = None
     created_at: datetime
     last_login_at: datetime | None

@@ -1,0 +1,393 @@
+# File: frontend/package.json
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^13.5.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-scripts": "5.0.1",
+    "web-vitals": "^2.1.4"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}
+
+# File: frontend/public/index.html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="Web site created using create-react-app"
+    />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <title>React App</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+  </body>
+</html>
+
+# File: frontend/public/manifest.json
+{
+  "short_name": "React App",
+  "name": "Create React App Sample",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "logo192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "logo512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+}
+
+# File: frontend/src/App.css
+.TestArray {
+  text-align: center;
+  margin-top: 50px;
+}
+.tab {
+  overflow: hidden;
+  border: 1px solid #ccc;
+  background-color: #f1f1f1;
+}
+.tab button {
+  background-color: inherit;
+  float: left;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  padding: 14px 16px;
+  transition: 0.3s;
+}
+.tab button:hover {
+  background-color: #ddd;
+}
+.tab button.active {
+  background-color: #ccc;
+}
+.tabcontent {
+  display: flex;
+  flex-wrap: wrap;
+  flex-direction: column;
+  justify-content: center;
+  align-content: center;
+}
+
+# File: frontend/src/App.js
+import { useState } from "react";
+import "./App.css";
+async function api(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(
+      data.message ||
+      data.detail ||
+      data.error ||
+      "Request failed"
+    );
+  }
+  return data;
+}
+function App() {
+  const [tab, setTab] = useState("Login");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [loginForm, setLoginForm] = useState({
+    email: "",
+    password: "",
+  });
+  const [registerForm, setRegisterForm] = useState({
+    first_name: "",
+    last_name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
+  async function login() {
+    setError("");
+    setSuccess("");
+    if (!loginForm.email) {
+      setError("Please enter your email.");
+      return;
+    }
+    if (!loginForm.email.includes("@")) {
+      setError("Please enter a valid email.");
+      return;
+    }
+    if (!loginForm.password) {
+      setError("Please enter your password.");
+      return;
+    }
+    try {
+      const data = await api(
+        "http:
+        loginForm
+      );
+      setSuccess("Logged in successfully!");
+      console.log(data);
+    } catch (err) {
+      setError(err.message || "Could not connect to the server.");
+    }
+  }
+  async function register() {
+    setError("");
+    setSuccess("");
+    if (!registerForm.first_name) {
+      setError("Please enter your first name.");
+      return;
+    }
+    if (!registerForm.last_name) {
+      setError("Please enter your last name.");
+      return;
+    }
+    if (!registerForm.email) {
+      setError("Please enter your email.");
+      return;
+    }
+    if (!registerForm.email.includes("@")) {
+      setError("Please enter a valid email.");
+      return;
+    }
+    if (!registerForm.password) {
+      setError("Please enter your password.");
+      return;
+    }
+    if (registerForm.password !== registerForm.confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    try {
+      const data = await api("http:
+      setSuccess("Account created successfully!");
+      console.log(data);
+    } catch (err) {
+      setError(err.message || "Could not connect to the server.");
+    }
+  }
+  return (
+    <div className="TestArray">
+      <h1>Test Array</h1>
+      <div className="tab">
+        <button
+          className={tab === "Login" ? "tablinks active" : "tablinks"}
+          onClick={() => {
+            setTab("Login");
+            setError("");
+            setSuccess("");
+          }}
+        >
+          Login
+        </button>
+        <button
+          className={tab === "Register" ? "tablinks active" : "tablinks"}
+          onClick={() => {
+            setTab("Register");
+            setError("");
+            setSuccess("");
+          }}
+        >
+          Register
+        </button>
+      </div>
+      {tab === "Login" && (
+        <div className="tabcontent">
+          <input
+            type="email"
+            placeholder="Email"
+            value={loginForm.email}
+            onChange={(e) =>
+              setLoginForm({
+                ...loginForm,
+                email: e.target.value,
+              })
+            }
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={loginForm.password}
+            onChange={(e) =>
+              setLoginForm({
+                ...loginForm,
+                password: e.target.value,
+              })
+            }
+          />
+          <button onClick={login}>Login</button>
+        </div>
+      )}
+      {tab === "Register" && (
+        <div className="tabcontent">
+          <input
+            placeholder="First name"
+            value={registerForm.first_name}
+            onChange={(e) =>
+              setRegisterForm({
+                ...registerForm,
+                first_name: e.target.value,
+              })
+            }
+          />
+          <input
+            placeholder="Last name"
+            value={registerForm.last_name}
+            onChange={(e) =>
+              setRegisterForm({
+                ...registerForm,
+                last_name: e.target.value,
+              })
+            }
+          />
+          <input
+            type="email"
+            placeholder="Email"
+            value={registerForm.email}
+            onChange={(e) =>
+              setRegisterForm({
+                ...registerForm,
+                email: e.target.value,
+              })
+            }
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={registerForm.password}
+            onChange={(e) =>
+              setRegisterForm({
+                ...registerForm,
+                password: e.target.value,
+              })
+            }
+          />
+          <input
+            type="password"
+            placeholder="Confirm password"
+            value={registerForm.confirmPassword}
+            onChange={(e) =>
+              setRegisterForm({
+                ...registerForm,
+                confirmPassword: e.target.value,
+              })
+            }
+          />
+          <button onClick={register}>Register</button>
+        </div>
+      )}
+      {error && <div className="error">{error}</div>}
+      {success && <div className="success">{success}</div>}
+    </div>
+  );
+}
+export default App;
+
+# File: frontend/src/App.test.js
+import { render, screen } from '@testing-library/react';
+import App from './App';
+test('renders learn react link', () => {
+  render(<App />);
+  const linkElement = screen.getByText(/learn react/i);
+  expect(linkElement).toBeInTheDocument();
+});
+
+# File: frontend/src/index.css
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+# File: frontend/src/index.js
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import App from './App';
+import reportWebVitals from './reportWebVitals';
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+reportWebVitals();
+
+# File: frontend/src/reportWebVitals.js
+const reportWebVitals = onPerfEntry => {
+  if (onPerfEntry && onPerfEntry instanceof Function) {
+    import('web-vitals').then(({ getCLS, getFID, getFCP, getLCP, getTTFB }) => {
+      getCLS(onPerfEntry);
+      getFID(onPerfEntry);
+      getFCP(onPerfEntry);
+      getLCP(onPerfEntry);
+      getTTFB(onPerfEntry);
+    });
+  }
+};
+export default reportWebVitals;
+
+# File: frontend/src/setupTests.js
+import '@testing-library/jest-dom';
+

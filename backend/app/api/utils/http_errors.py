@@ -1,6 +1,5 @@
 from fastapi import HTTPException, status
 
-
 class HttpError:
     @staticmethod
     def raise_error(status_code: int, detail: str) -> None:

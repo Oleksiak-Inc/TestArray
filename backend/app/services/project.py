@@ -22,7 +22,6 @@ class ProjectService(BaseService):
                     last_name="Owner",
                     email="system-owner@example.com",
                     password="placeholder",
-                    user_type_id=1,
                 )
                 self.db.add(owner)
                 self.db.flush()

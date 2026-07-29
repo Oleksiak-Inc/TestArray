@@ -16,6 +16,10 @@ class Projects(Base):
 
     runs = relationship("Runs", back_populates="project", foreign_keys="Runs.project_id")
 
+    members = relationship('ProjectMembers', back_populates='project', foreign_keys='ProjectMembers.project_id')
+
+    test_case_restrictions = relationship("TestCaseRestrictions", back_populates="project", foreign_keys="TestCaseRestrictions.project_id")
+    test_suite_restrictions = relationship("TestSuiteRestrictions", back_populates="project", foreign_keys="TestSuiteRestrictions.project_id")
     __table_args__ = (
         Index("project_name_idx", "name"),
     )
